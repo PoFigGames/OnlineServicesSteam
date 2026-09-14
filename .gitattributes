@@ -1,0 +1,30 @@
+# Normalise line endings on the way in; check out what the platform expects.
+* text=auto
+
+*.cpp   text diff=cpp
+*.h     text diff=cpp
+*.inl   text diff=cpp
+*.cs    text diff=csharp
+*.ini   text
+*.md    text diff=markdown
+*.uplugin text
+*.tps   text
+
+# Windows tooling is happier with CRLF for these.
+*.bat   text eol=crlf
+*.ps1   text eol=crlf
+*.sh    text eol=lf
+
+# Never touch these.
+*.png   binary
+*.jpg   binary
+*.dll   binary
+*.dylib binary
+*.so    binary
+*.lib   binary
+*.a     binary
+*.uasset binary
+*.umap   binary
+
+# Keep generated and vendored files out of language statistics and diffs.
+Source/ThirdParty/** linguist-vendored

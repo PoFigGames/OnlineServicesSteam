@@ -1,0 +1,58 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "0.9",
+	"FriendlyName": "Online Services Steam",
+	"Description": "Online Services (OSSv2) implemented on the Steamworks SDK, with a net driver that carries the game's traffic over the Steam Datagram Relay.",
+	"Category": "Online Platform",
+	"CreatedBy": "PoFig Games Studio",
+	"CreatedByURL": "https://www.pofig.games",
+	"EnabledByDefault": false,
+	"IsBetaVersion": true,
+	"Modules": [
+		{
+			"Name": "SteamworksCommon",
+			"Type": "Runtime",
+			"LoadingPhase": "EarliestPossible",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		},
+		{
+			"Name": "OnlineSocketsSteam",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		},
+		{
+			"Name": "OnlineServicesSteam",
+			"Type": "Runtime",
+			"LoadingPhase": "PostConfigInit",
+			"PlatformAllowList": [
+				"Win64",
+				"Mac",
+				"Linux"
+			]
+		}
+	],
+	"Plugins": [
+		{
+			"Name": "OnlineBase",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineServices",
+			"Enabled": true
+		},
+		{
+			"Name": "OnlineSubsystemUtils",
+			"Enabled": true
+		}
+	]
+}

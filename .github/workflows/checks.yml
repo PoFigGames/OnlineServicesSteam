@@ -1,0 +1,114 @@
+name: Checks
+
+# The plugin cannot be compiled here: building it needs an Unreal Engine installation and a copy of the
+# Steamworks SDK, and neither may be published to a runner. What is checked instead is everything that
+# can be checked without them, so that a pull request is at least well formed before a human builds it.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  repository:
+    name: Repository hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The Steamworks SDK is not committed
+        run: |
+          if git ls-files -- 'Source/ThirdParty/SteamworksSDK/Steamv*' | grep .; then
+            echo "::error::Valve's SDK must not be committed; see the Steamworks SDK section of README.md."
+            exit 1
+          fi
+
+      - name: No build output is committed
+        run: |
+          if git ls-files -- 'Binaries/*' 'Intermediate/*' 'Saved/*' 'DerivedDataCache/*' | grep .; then
+            echo "::error::The files above are build output and must not be committed."
+            exit 1
+          fi
+
+      - name: Every source file carries a copyright header
+        run: |
+          status=0
+          while IFS= read -r file; do
+            if ! head -1 "$file" | grep -q "Copyright .* All Rights Reserved\."; then
+              echo "::error file=$file,line=1::Missing copyright header."
+              status=1
+            fi
+          done < <(find Source -name '*.h' -o -name '*.cpp' -o -name '*.inl' -o -name '*.cs')
+          exit $status
+
+      - name: The plugin ships its own icons
+        run: |
+          # The badge used to be Valve's own logo, which was not ours to publish and so was kept out of
+          # the repository. It is the studio's mark now, so both sizes are expected to be here.
+          status=0
+          for icon in Resources/Icon128.png Resources/Icon32.png; do
+            [ -f "$icon" ] || { echo "::error::$icon is missing."; status=1; }
+          done
+          exit $status
+
+      - name: The plugin does not depend on a host project
+        run: |
+          if grep -rnE '\b[A-Za-z0-9_]+(Game|Editor|Server|Client)Target\b' --include='*.Build.cs' Source; then
+            echo "::error::A module of this plugin references a project's target rules. The plugin has to build in any project; put shared settings in OnlineServicesSteamDefaults instead."
+            exit 1
+          fi
+
+  descriptor:
+    name: Plugin descriptor
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: The .uplugin is valid and its modules exist
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, sys
+
+          descriptor = pathlib.Path('OnlineServicesSteam.uplugin')
+          plugin = json.loads(descriptor.read_text(encoding='utf-8'))
+
+          status = 0
+          for module in plugin['Modules']:
+              name = module['Name']
+              rules = pathlib.Path('Source') / name / f'{name}.Build.cs'
+              if not rules.is_file():
+                  print(f'::error file={descriptor}::Module {name} has no {rules}.')
+                  status = 1
+
+          for rules in pathlib.Path('Source').glob('*/*.Build.cs'):
+              name = rules.stem.removesuffix('.Build')
+              if name not in {module['Name'] for module in plugin['Modules']}:
+                  print(f'::error file={rules}::Module {name} is not listed in {descriptor}.')
+                  status = 1
+
+          sys.exit(status)
+          PY
+
+  documentation:
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Local links resolve
+        run: |
+          python3 - <<'PY'
+          import pathlib, re, sys
+
+          status = 0
+          for document in pathlib.Path('.').glob('*.md'):
+              for target in re.findall(r'\]\(([^)#][^)]*)\)', document.read_text(encoding='utf-8')):
+                  if target.startswith(('http://', 'https://', 'mailto:')):
+                      continue
+                  if not pathlib.Path(target.split('#')[0]).exists():
+                      print(f'::error file={document}::Broken link to {target}.')
+                      status = 1
+
+          sys.exit(status)
+          PY

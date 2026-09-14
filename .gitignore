@@ -1,0 +1,36 @@
+# ---- Unreal build output -----------------------------------------------------
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+Build/
+
+# ---- Steamworks SDK ----------------------------------------------------------
+# Valve's SDK is not redistributable, so it is fetched per checkout rather than
+# committed. Only the build rules and the licence descriptor live in the tree.
+# See the "Steamworks SDK" section of README.md.
+Source/ThirdParty/SteamworksSDK/Steamv*/
+!Source/ThirdParty/SteamworksSDK/SteamworksSDK.build.cs
+
+# App ID files belong to a developer's machine, not to the repository.
+steam_appid.txt
+
+# ---- Editors and tooling -----------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.sln
+*.suo
+*.xcodeproj/
+*.xcworkspace/
+*.VC.db
+*.VC.opendb
+*.opensdf
+*.sdf
+compile_commands.json
+.clangd/
+
+# ---- Operating systems -------------------------------------------------------
+.DS_Store
+Thumbs.db
+desktop.ini
