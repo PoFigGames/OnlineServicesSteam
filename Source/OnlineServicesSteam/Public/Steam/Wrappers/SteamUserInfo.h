@@ -15,7 +15,7 @@ namespace PoFigGames::Steam
 	/**
 	 * @enum EAvatarImageSize
 	 *
-	 * Size of an avatar image requested from Steam.
+	 * @brief Size of an avatar image requested from Steam.
 	 */
 	enum class EAvatarImageSize : uint8
 	{
@@ -57,8 +57,10 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamUserAvatar
 		 *
-		 * Fetches a user's avatar image. Steam answers on a broadcast callback shared by every listener,
-		 * unless the image is already cached locally.
+		 * @brief Fetches a user's avatar image.
+		 *
+		 * Steam answers on a broadcast callback shared by every listener, unless the image is already
+		 * cached locally.
 		 */
 		struct FSteamUserAvatar
 		{
@@ -174,8 +176,10 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamUserInfo
 		 *
-		 * Requests a user's persona data. Steam answers on a broadcast callback shared by every listener,
-		 * unless the data is already cached locally.
+		 * @brief Requests a user's persona data.
+		 *
+		 * Steam answers on a broadcast callback shared by every listener, unless the data is already
+		 * cached locally.
 		 */
 		struct FSteamUserInfo
 		{

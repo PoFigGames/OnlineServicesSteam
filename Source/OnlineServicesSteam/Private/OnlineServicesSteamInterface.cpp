@@ -7,28 +7,16 @@
 
 // Engine
 #include "Engine/Engine.h"
-#include "Runtime/Launch/Resources/Version.h"
+#include "Online/Auth.h"
 #include "Online/ExternalUI.h"
 #include "Online/OnlineAsyncOpHandle.h"
 #include "Online/OnlineResult.h"
 #include "Online/OnlineServices.h"
+#include "Online/OnlineServicesEngineUtils.h"
 #include "Online/OnlineServicesRegistry.h"
 
 
 #include UE_INLINE_GENERATED_CPP_BY_NAME(OnlineServicesSteamInterface)
-
-/**
- * The online services engine utils, which own the mapping from a world to its online services instance, are
- * only exposed by OnlineSubsystemUtils from 5.8 on. Older engines get the same answer from the world context
- * directly, which is what the engine implementation does internally anyway.
- */
-#define STEAM_HAS_ONLINE_SERVICES_ENGINE_UTILS (ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8))
-
-#if STEAM_HAS_ONLINE_SERVICES_ENGINE_UTILS
-#include "Online/OnlineServicesEngineUtils.h"
-#else
-#include "Engine/World.h"
-#endif
 
 
 UOnlineServicesSteamInterface::UOnlineServicesSteamInterface(const FObjectInitializer& ObjectInitializer)
@@ -44,24 +32,12 @@ bool UOnlineServicesSteamInterface::IsLoaded(FName OnlineIdentifier)
 
 FName UOnlineServicesSteamInterface::GetOnlineIdentifier(FWorldContext& WorldContext)
 {
-#if STEAM_HAS_ONLINE_SERVICES_ENGINE_UTILS
 	if (UE::Online::IOnlineServicesEngineUtils* EngineUtils = UE::Online::GetServicesEngineUtils())
 	{
 		return EngineUtils->GetOnlineIdentifier(WorldContext);
 	}
 
 	return NAME_None;
-#else
-	// A world played in the editor gets an instance of its own; everything else shares the default one.
-	#if WITH_EDITOR
-	if (WorldContext.WorldType == EWorldType::PIE)
-	{
-		return WorldContext.ContextHandle;
-	}
-	#endif
-
-	return NAME_None;
-#endif
 }
 
 bool UOnlineServicesSteamInterface::DoesInstanceExist(FName OnlineIdentifier)
@@ -133,7 +109,7 @@ FUniqueNetIdWrapper UOnlineServicesSteamInterface::GetUniquePlayerIdWrapper(UWor
 
 	if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 	{
-		if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+		if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 		{
 			UE::Online::FAuthGetLocalOnlineUserByPlatformUserId::Params GetAccountParams = { FPlatformMisc::GetPlatformUserForUserIndex(LocalUserNum) };
 			auto GetAccountResult = AuthPtr->GetLocalOnlineUserByPlatformUserId(MoveTemp(GetAccountParams));
@@ -148,14 +124,22 @@ FUniqueNetIdWrapper UOnlineServicesSteamInterface::GetUniquePlayerIdWrapper(UWor
 
 FString UOnlineServicesSteamInterface::GetPlayerNickname(UWorld* World, const FUniqueNetIdWrapper& UniqueId)
 {
-	check(UniqueId.IsValid() && UniqueId.IsV2());
+	// The only one of these that reads the identity it is given, so the only one that has to say no to an
+	// identity it cannot read. GetV2 ensures on anything else.
+	if (!UniqueId.IsValid() || !UniqueId.IsV2())
+	{
+		UE_LOG(LogOnlineServicesSteam, Warning,
+			TEXT("[UOnlineServicesSteamInterface] A nickname was asked for an identity that is not a v2 one; only v2 identities are spoken here"));
+
+		return FString { };
+	}
 
 	const FName OnlineIdentifier = GetOnlineIdentifier(GEngine->GetWorldContextFromWorldChecked(World));
 	constexpr UE::Online::EOnlineServices OnlineServicesType = UE::Online::EOnlineServices::Steam;
 
 	if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 	{
-		if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+		if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 		{
 			UE::Online::FAuthGetLocalOnlineUserByOnlineAccountId::Params GetAccountParams = { UniqueId.GetV2() };
 			auto GetAccountResult = AuthPtr->GetLocalOnlineUserByOnlineAccountId(MoveTemp(GetAccountParams));
@@ -179,7 +163,7 @@ bool UOnlineServicesSteamInterface::GetPlayerPlatformNickname(UWorld* World, int
 
 	if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 	{
-		if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+		if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 		{
 			UE::Online::FAuthGetLocalOnlineUserByPlatformUserId::Params GetAccountParams = { FPlatformMisc::GetPlatformUserForUserIndex(LocalUserNum) };
 			auto GetAccountResult = AuthPtr->GetLocalOnlineUserByPlatformUserId(MoveTemp(GetAccountParams));
@@ -206,7 +190,7 @@ bool UOnlineServicesSteamInterface::AutoLogin(UWorld* World, int32 LocalUserNum,
 
 	if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 	{
-		if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+		if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 		{
 			UE::Online::FAuthLogin::Params LoginParameters;
 			LoginParameters.PlatformUserId = FPlatformMisc::GetPlatformUserForUserIndex(LocalUserNum);
@@ -234,7 +218,7 @@ bool UOnlineServicesSteamInterface::IsLoggedIn(UWorld* World, int32 LocalUserNum
 
 	if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 	{
-		if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+		if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 		{
 			UE::Online::FAuthGetLocalOnlineUserByPlatformUserId::Params GetAccountParams = { FPlatformMisc::GetPlatformUserForUserIndex(LocalUserNum) };
 			auto GetAccountResult = AuthPtr->GetLocalOnlineUserByPlatformUserId(MoveTemp(GetAccountParams));
@@ -281,20 +265,14 @@ void UOnlineServicesSteamInterface::UpdateSessionJoinability(UWorld* World, FNam
 
 void UOnlineServicesSteamInterface::RegisterPlayer(UWorld* World, FName SessionName, const FUniqueNetIdWrapper& UniqueId, bool bWasInvited)
 {
-	check(UniqueId.IsValid() && UniqueId.IsV2());
 }
 
 void UOnlineServicesSteamInterface::UnregisterPlayer(UWorld* World, FName SessionName, const FUniqueNetIdWrapper& UniqueId)
 {
-	check(UniqueId.IsValid() && UniqueId.IsV2());
 }
 
 void UOnlineServicesSteamInterface::UnregisterPlayers(UWorld* World, FName SessionName, const TArray<FUniqueNetIdWrapper>& Players)
 {
-	for (const auto& PlayerId : Players)
-	{
-		check(PlayerId.IsValid() && PlayerId.IsV2());
-	}
 }
 
 bool UOnlineServicesSteamInterface::GetResolvedConnectString(UWorld* World, FName SessionName, FString& URL)
@@ -332,14 +310,12 @@ void UOnlineServicesSteamInterface::ClearVoicePackets(UWorld* World)
 bool UOnlineServicesSteamInterface::MuteRemoteTalker(UWorld* World, uint8 LocalUserNum, const FUniqueNetIdWrapper& PlayerId, bool bIsSystemWide)
 {
 	// Nothing to do until the game has voice.
-	check(PlayerId.IsValid() && PlayerId.IsV2());
 	return false;
 }
 
 bool UOnlineServicesSteamInterface::UnmuteRemoteTalker(UWorld* World, uint8 LocalUserNum, const FUniqueNetIdWrapper& PlayerId, bool bIsSystemWide)
 {
 	// Nothing to do until the game has voice.
-	check(PlayerId.IsValid() && PlayerId.IsV2());
 	return false;
 }
 
@@ -492,7 +468,7 @@ void UOnlineServicesSteamInterface::LoginPIEInstance(FName OnlineIdentifier, int
 		constexpr UE::Online::EOnlineServices OnlineServicesType = UE::Online::EOnlineServices::Default;
 		if (const UE::Online::IOnlineServicesPtr OnlineServices = UE::Online::GetServices(OnlineServicesType, OnlineIdentifier))
 		{
-			if (const UE::Online::IAuthPtr AuthPtr = OnlineServices->GetAuthInterface())
+			if (const auto AuthPtr = OnlineServices->GetAuthInterface())
 			{
 				UE::Online::FAuthLogin::Params LoginParameters;
 				LoginParameters.CredentialsType = TEXT("Steam");

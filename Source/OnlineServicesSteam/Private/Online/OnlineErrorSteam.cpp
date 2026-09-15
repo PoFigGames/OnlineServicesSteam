@@ -8,6 +8,11 @@
 
 namespace PoFigGames::Online::Errors
 {
+	/**
+	 * @class FOnlineErrorDetailsSteam
+	 *
+	 * @brief Puts Steam's own EResult behind an online error, so that the native code survives the trip.
+	 */
 	class FOnlineErrorDetailsSteam : public UE::Online::IOnlineErrorDetails
 	{
 	public:

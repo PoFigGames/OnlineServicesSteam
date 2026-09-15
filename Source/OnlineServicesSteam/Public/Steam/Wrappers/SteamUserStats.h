@@ -29,7 +29,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamUserStats
 	 *
-	 * Downloads a user's stats and achievements. Answered through the Steam CallResult system.
+	 * @brief Downloads a user's stats and achievements. Answered through the Steam CallResult system.
 	 */
 	struct FSteamUserStats
 	{
@@ -75,8 +75,10 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamStoreStats
 	 *
-	 * Commits the stats and achievements set locally to the Steam backend. Steam answers on a broadcast
-	 * callback, plus one more callback for every achievement the commit unlocked.
+	 * @brief Commits the stats and achievements set locally to the Steam backend.
+	 *
+	 * Steam answers on a broadcast callback, plus one more callback for every achievement the commit
+	 * unlocked.
 	 */
 	struct FSteamStoreStats
 	{
@@ -137,8 +139,10 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamAchievementIcon
 	 *
-	 * Fetches the icon of one achievement. Steam keeps a single icon per achievement, the one which
-	 * matches its current state, and answers on a broadcast callback unless the image is already cached.
+	 * @brief Fetches the icon of one achievement.
+	 *
+	 * Steam keeps a single icon per achievement, the one which matches its current state, and answers on a
+	 * broadcast callback unless the image is already cached.
 	 */
 	struct FSteamAchievementIcon
 	{

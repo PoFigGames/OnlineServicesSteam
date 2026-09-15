@@ -29,33 +29,33 @@ namespace PoFigGames::Online
 	{
 	public:
 		static const UE::Online::FAccountId InvalidSteamAccountId;
-		
+
 		ONLINESERVICESSTEAM_API FOnlineAccountIdRegistrySteam(UE::Online::EOnlineServices Services);
 		virtual ~FOnlineAccountIdRegistrySteam() override = default;
 
-	#pragma region IOnlineAccountIdRegistrySteam		
+	#pragma region IOnlineAccountIdRegistrySteam
 		ONLINESERVICESSTEAM_API virtual UE::Online::FAccountId FindOrAddAccountId(const CSteamID& SteamAccountId) override;
 		ONLINESERVICESSTEAM_API virtual UE::Online::FAccountId FindAccountId(const CSteamID& SteamAccountId) const override;
 		ONLINESERVICESSTEAM_API virtual CSteamID               GetSteamId(const UE::Online::FAccountId& AccountId) const override;
-	#pragma endregion
+	#pragma endregion IOnlineAccountIdRegistrySteam
 
-	#pragma region IOnlineAccountIdRegistry	
+	#pragma region IOnlineAccountIdRegistry
 		ONLINESERVICESSTEAM_API virtual FString                ToString(const UE::Online::FAccountId& AccountId) const override;
 		ONLINESERVICESSTEAM_API virtual FString                ToLogString(const UE::Online::FAccountId& AccountId) const override;
 		ONLINESERVICESSTEAM_API virtual TArray<uint8>          ToReplicationData(const UE::Online::FAccountId& AccountId) const override;
 		ONLINESERVICESSTEAM_API virtual UE::Online::FAccountId FromReplicationData(const TArray<uint8>& ReplicationData) override;
-		ONLINESERVICESSTEAM_API virtual UE::Online::FAccountId FromStringData(const FString& StringData) override;		
-	#pragma endregion 
+		ONLINESERVICESSTEAM_API virtual UE::Online::FAccountId FromStringData(const FString& StringData) override;
+	#pragma endregion IOnlineAccountIdRegistry
 
 		static ONLINESERVICESSTEAM_API FOnlineAccountIdRegistrySteam& GetRegistered(UE::Online::EOnlineServices Services);
-		
+
 	private:
 		UE::Online::TOnlineBasicAccountIdRegistry<CSteamID> Registry;
 	};
-	
+
 	ONLINESERVICESSTEAM_API CSteamID GetSteamUserId(const UE::Online::FAccountId& AccountId);
 	ONLINESERVICESSTEAM_API CSteamID GetSteamUserIdChecked(const UE::Online::FAccountId& AccountId);
-	
+
 	ONLINESERVICESSTEAM_API UE::Online::FAccountId FindAccountId(const CSteamID& SteamUserId, UE::Online::EOnlineServices Services = UE::Online::EOnlineServices::Steam);
 	ONLINESERVICESSTEAM_API UE::Online::FAccountId FindAccountIdChecked(const CSteamID& SteamUserId, UE::Online::EOnlineServices Services = UE::Online::EOnlineServices::Steam);
 

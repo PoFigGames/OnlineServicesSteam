@@ -5,21 +5,24 @@
 namespace PoFigGames::Online
 {
 	const UE::Online::FAccountId FOnlineAccountIdRegistrySteam::InvalidSteamAccountId { UE::Online::EOnlineServices::Steam, 0 };
-	
+
 	FOnlineAccountIdRegistrySteam::FOnlineAccountIdRegistrySteam(const UE::Online::EOnlineServices Services)
 		: Registry(Services)
 	{
-		
+
 	}
 
 	UE::Online::FAccountId FOnlineAccountIdRegistrySteam::FindOrAddAccountId(const CSteamID& SteamAccountId)
 	{
-		if (ensure(SteamAccountId.IsValid()))
+		// Checked rather than ensured: an id that names nobody arrives from a peer as a matter of course -
+		// eight zero bytes in a replicated identity are all it takes - and that is an answer to give, not a
+		// mistake to report. An ensure here wrote a callstack to the log for every one of them.
+		if (!SteamAccountId.IsValid())
 		{
-			return Registry.FindOrAddHandle(SteamAccountId);
+			return Registry.GetInvalidHandle();
 		}
 
-		return Registry.GetInvalidHandle();
+		return Registry.FindOrAddHandle(SteamAccountId);
 	}
 
 
@@ -46,9 +49,9 @@ namespace PoFigGames::Online
 			check(!AccountId.IsValid()); // Check we haven't been passed a valid handle for a different EOnlineServices.
 			Result = TEXT("Invalid");
 		}
-		
+
 		return Result;
-		
+
 	}
 
 	FString FOnlineAccountIdRegistrySteam::ToLogString(const UE::Online::FAccountId& AccountId) const
@@ -69,7 +72,7 @@ namespace PoFigGames::Online
 				FMemory::Memcpy(ReplicationData.GetData(), &SteamId, sizeof(uint64));
 			}
 		}
-		
+
 		return ReplicationData;
 	}
 
@@ -79,25 +82,31 @@ namespace PoFigGames::Online
 		{
 			uint64 SteamId;
 			FMemory::Memcpy(&SteamId, ReplicationData.GetData(), sizeof(uint64));
-			
+
 			return FindOrAddAccountId(SteamId);
 		}
-		
-		return Registry.GetInvalidHandle();		
+
+		return Registry.GetInvalidHandle();
 	}
 
 	UE::Online::FAccountId FOnlineAccountIdRegistrySteam::FromStringData(const FString& StringData)
 	{
-		return InvalidSteamAccountId;
+		// The other way round from ToString, which writes the SteamID in decimal. Anything that is not one -
+		// a name, another provider's spelling, the word ToString writes for a handle this registry does not
+		// own - parses to nothing a SteamID can be, and is answered with the invalid handle.
+		uint64 SteamId { 0 };
+		LexFromString(SteamId, *StringData);
+
+		return FindOrAddAccountId(CSteamID { SteamId });
 	}
 
 	FOnlineAccountIdRegistrySteam& FOnlineAccountIdRegistrySteam::GetRegistered(const UE::Online::EOnlineServices Services)
 	{
 		check(Services == UE::Online::EOnlineServices::Steam);
 
-		UE::Online::IOnlineAccountIdRegistry* Registry = UE::Online::FOnlineIdRegistryRegistry::Get().GetAccountIdRegistry(Services);
+		const auto Registry = UE::Online::FOnlineIdRegistryRegistry::Get().GetAccountIdRegistry(Services);
 		check(Registry);
-	
+
 		return *static_cast<FOnlineAccountIdRegistrySteam*>(Registry);
 	}
 

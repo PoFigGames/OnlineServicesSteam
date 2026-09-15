@@ -12,7 +12,8 @@ THIRD_PARTY_INCLUDES_START
 THIRD_PARTY_INCLUDES_END
 
 
-namespace UE::Online {
+namespace UE::Online
+{
 	class FOnlineAsyncOp;
 }
 
@@ -22,9 +23,8 @@ namespace PoFigGames::Online
 	/**
 	 * @struct FLobbyPrerequisitesSteam
 	 *
-	 * @brief Common components required to handle lobby requests.
-	 * To handle lifetime issues, only FLobbiesSteam should contain a strong reference to prerequisites.
-	 * Everybody else keeps a weak one.
+	 * @brief What every lobby request is handled through, shared by the component and by each lobby
+	 * object it creates.
 	 */
 	struct FLobbyPrerequisitesSteam
 	{
@@ -37,9 +37,11 @@ namespace PoFigGames::Online
 	/**
 	 * @enum ELobbyDetailsSource
 	 *
-	 * @brief Lobby details are created for each user within the EOS lobby client. Certain operations such as
-	 * joining, and writing lobby or member attributes, only work through a handle of the
-	 * lobby details handle.
+	 * @brief Where the knowledge of a lobby this process is not a member of came from.
+	 *
+	 * Steam hands out the same lobby id whether it arrived in an invitation, through the overlay or out of a
+	 * search, and a lobby is joinable from any of them; only a lobby this process has actually joined can be
+	 * written to.
 	 */
 	enum class ELobbyDetailsSource
 	{
@@ -221,6 +223,11 @@ namespace PoFigGames::Online
 	};
 
 
+	/**
+	 * @class FLobbyDataRegistrySteam
+	 *
+	 * @brief Every lobby this process knows about, found by the Steam id or by the id the services use.
+	 */
 	class FLobbyDataRegistrySteam : public TSharedFromThis<FLobbyDataRegistrySteam>
 	{
 	public:

@@ -205,18 +205,19 @@ namespace PoFigGames::Online
 		auto LobbyCategory = BaseCategory;
 		if (!BaseCategory->SchemaCompatibilityServiceAttributeId.IsNone())
 		{
-			for (const auto& Attribute : SteamSnapshot.Attributes)
-			{
-				// Looked up, never added: the key comes off the wire, and a name once interned is never
-				// reclaimed. Every name the schema declares is already in the table by the time a lobby
-				// is read, so Find resolves each of them exactly as Add would.
-				if (UE::Online::FSchemaServiceAttributeId(*Attribute.Key, FNAME_Find) != BaseCategory->SchemaCompatibilityServiceAttributeId)
+			// Looked up, never added: the key comes off the wire, and a name once interned is never
+			// reclaimed. Every name the schema declares is already in the table by the time a lobby is
+			// read, so Find resolves each of them exactly as Add would.
+			const auto CompatibilityAttribute = SteamSnapshot.Attributes.FindByPredicate(
+				[&BaseCategory](const Steam::FSteamLobbyAttributeData& Attribute)
 				{
-					continue;
-				}
+					return UE::Online::FSchemaServiceAttributeId(*Attribute.Key, FNAME_Find) == BaseCategory->SchemaCompatibilityServiceAttributeId;
+				});
 
+			if (CompatibilityAttribute != nullptr)
+			{
 				int64 CompatibilityId { 0 };
-				LexFromString(CompatibilityId, *Attribute.Value);
+				LexFromString(CompatibilityId, *CompatibilityAttribute->Value);
 
 				if (const auto DerivedSchema = Prerequisites->SchemaRegistry->GetDefinition(CompatibilityId))
 				{
@@ -226,8 +227,6 @@ namespace PoFigGames::Online
 						LastKnownSchemaId = DerivedSchema->Id;
 					}
 				}
-
-				break;
 			}
 		}
 
@@ -261,20 +260,18 @@ namespace PoFigGames::Online
 					? TranslateJoinPolicy(static_cast<ELobbyType>(LobbyType))
 					: UE::Online::ELobbyJoinPolicy::InvitationOnly;
 
-				// This key belongs to the plugin rather than to the schema, so there is nothing further to
-				// look up: falling through logged it as an attribute the schema does not describe.
-				continue;
 			}
-
-			const auto AttributeDefinition = LobbyCategory->ServiceAttributeDefinitions.Find(AttributeId);
-			if (AttributeDefinition == nullptr)
+			// This key belongs to the plugin rather than to the schema, so it is answered above and looked
+			// up nowhere; the schema is asked about everything else.
+			else if (const auto AttributeDefinition = LobbyCategory->ServiceAttributeDefinitions.Find(AttributeId))
+			{
+				LobbyServiceSnapshot.SchemaServiceSnapshot.Attributes.Emplace(AttributeId, FromSteamAttributeValue(Attribute.Value, AttributeDefinition->Type));
+			}
+			else
 			{
 				UE_LOG(LogOnlineServicesSteam, VeryVerbose, TEXT("[FLobbyDetailsSteam::GetLobbySnapshot] Skipping attribute the schema does not describe: Lobby [%s], Key [%s]"),
 					*ToLogString(GetLobbySteamId()), *Attribute.Key);
-				continue;
 			}
-
-			LobbyServiceSnapshot.SchemaServiceSnapshot.Attributes.Emplace(AttributeId, FromSteamAttributeValue(Attribute.Value, AttributeDefinition->Type));
 		}
 
 		auto UserSteamIds = MoveTemp(SteamSnapshot.Members);

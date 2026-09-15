@@ -183,7 +183,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -230,12 +230,12 @@ namespace PoFigGames::Online
 		.Then(Steam::Unwrap<Steam::Wrappers::FSteamCreateLobby>(TEXT("FLobbiesSteam::CreateLobby"),
 			[this](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp, Steam::Wrappers::FSteamCreateLobby::Result&& Result)
 		{
-			InAsyncOp.Data.Set<CSteamID>(LOBBY_STEAM_ID_KEY_NAME, Result.LobbyId);
+			InAsyncOp.Data.Set<CSteamID>(LobbySteamIdKey, Result.LobbyId);
 		}))
 		// Step 4: Create the lobby details object from the lobby id.
 		.Then([this, DestroyLobbyDuringCreate](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
-			const CSteamID& LobbySteamId = GetOpDataChecked<CSteamID>(InAsyncOp, LOBBY_STEAM_ID_KEY_NAME);
+			const CSteamID& LobbySteamId = GetOpDataChecked<CSteamID>(InAsyncOp, LobbySteamIdKey);
 
 			// Ask for a details handle before anything else can be done with the lobby.
 			auto Result = FLobbyDetailsSteam::CreateFromLobbyId(LobbyPrerequisites.ToSharedRef(), Params.LocalAccountId, LobbySteamId);
@@ -247,21 +247,21 @@ namespace PoFigGames::Online
 				return DestroyLobbyDuringCreate(InAsyncOp, Params.LocalAccountId, LobbySteamId, MoveTemp(Result.GetErrorValue()));
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LOBBY_DETAILS_KEY_NAME, Result.GetOkValue());
+			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LobbyDetailsKey, Result.GetOkValue());
 			return MakeFulfilledPromise<void>().GetFuture();
 		})
 		// Step 5: Create the lobby data object from the lobby details.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 			return LobbyDataRegistry->FindOrCreateFromLobbyDetails(Params.LocalAccountId, LobbyDetails);
 		})
 		// Step 6: Handle errors and store the lobby data on the async op properties.
 		.Then([this, DestroyLobbyDuringCreate](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp, UE::Online::TDefaultErrorResultInternal<TSharedRef<FLobbyDataSteam>>&& Result)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const CSteamID& LobbySteamId = GetOpDataChecked<CSteamID>(InAsyncOp, LOBBY_STEAM_ID_KEY_NAME);
+			const CSteamID& LobbySteamId = GetOpDataChecked<CSteamID>(InAsyncOp, LobbySteamIdKey);
 
 			if (Result.IsError())
 			{
@@ -272,14 +272,14 @@ namespace PoFigGames::Online
 			}
 
 			// Park the lobby on the operation for the steps that follow.
-			InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, MoveTemp(Result.GetOkValue()));
+			InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, MoveTemp(Result.GetOkValue()));
 			return MakeFulfilledPromise<void>().GetFuture();
 		})
 		// Step 7: Set lobby and creator attributes, change to user lobby privacy setting.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -310,7 +310,7 @@ namespace PoFigGames::Online
 		.Then([this, DestroyLobbyDuringCreate](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp, UE::Online::TDefaultErrorResult<FLobbiesModifyLobbyDataImpl>&& Result) mutable
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			if (Result.IsError())
 			{
@@ -326,7 +326,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FCreateLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Mark the lobby active.
 			AddActiveLobby(Params.LocalAccountId, Params.bPresenceEnabled, LobbyData);
@@ -355,7 +355,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FFindLobbies>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -391,14 +391,14 @@ namespace PoFigGames::Online
 			}
 			else
 			{
-				InAsyncOp.Data.Set<TSharedRef<FLobbySearchSteam>>(LOBBY_SEARCH_KEY_NAME, Result.GetOkValue());
+				InAsyncOp.Data.Set<TSharedRef<FLobbySearchSteam>>(LobbySearchKey, Result.GetOkValue());
 			}
 		})
 		// Step 4: Add the lobby to the active search list and signal notifications.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FFindLobbies>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbySearch = GetOpDataChecked<TSharedRef<FLobbySearchSteam>>(InAsyncOp, LOBBY_SEARCH_KEY_NAME);
+			const auto& LobbySearch = GetOpDataChecked<TSharedRef<FLobbySearchSteam>>(InAsyncOp, LobbySearchKey);
 
 			ActiveSearchResults.Add(Params.LocalAccountId, LobbySearch);
 
@@ -457,7 +457,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -500,8 +500,8 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LOBBY_DETAILS_KEY_NAME, LobbyDetails.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LobbyDetailsKey, LobbyDetails.ToSharedRef());
 			}
 			else
 			{
@@ -512,7 +512,7 @@ namespace PoFigGames::Online
 		// Step 2. Join the lobby.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
-			const auto& LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+			const auto& LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 			Steam::Wrappers::FSteamJoinLobby::Params JoinLobbyRequest { LobbyDetails->GetLobbySteamId() };
 
 			return SteamCall<Steam::Wrappers::FSteamJoinLobby>(MoveTemp(JoinLobbyRequest));
@@ -521,7 +521,7 @@ namespace PoFigGames::Online
 		.Then([this, LeaveLobbyDuringJoin](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp, Steam::TSteamResult<Steam::Wrappers::FSteamJoinLobby>&& Result)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			if (Result.IsError())
 			{
@@ -538,7 +538,7 @@ namespace PoFigGames::Online
 		.Then([this, LeaveLobbyDuringJoin](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Ask for a details handle before anything else can be done with the lobby.
 			UE::Online::TDefaultErrorResultInternal<TSharedRef<FLobbyDetailsSteam>> Result =
@@ -553,13 +553,13 @@ namespace PoFigGames::Online
 			}
 
 			// Carry the details forward; the next step registers them.
-			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LOBBY_DETAILS_KEY_NAME, Result.GetOkValue());
+			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LobbyDetailsKey, Result.GetOkValue());
 			return MakeFulfilledPromise<void>().GetFuture();
 		})
 		// Step 5: Create the lobby data object from the lobby details.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
-			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 			return LobbyDataRegistry->FindOrCreateFromLobbyDetails(InAsyncOp.GetParams().LocalAccountId, LobbyDetails);
 		})
 		// Step 6: Handle possible errors from FindOrCreateFromLobbyDetails.
@@ -569,7 +569,7 @@ namespace PoFigGames::Online
 
 			if (Result.IsError())
 			{
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::JoinLobby] FLobbyDataRegistrySteam::FindOrCreateFromLobbyDetails Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -582,13 +582,14 @@ namespace PoFigGames::Online
 		// Step 7: Update lobby data
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
-			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 			return LobbyDetails->GetLobbySnapshot(true);
 		})
-		// Step 8: Handel errors
-		.Then([this, LeaveLobbyDuringJoin](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp, UE::Online::TDefaultErrorResultInternal<UE::Online::FLobbyServiceSnapshot>&& Result) {
-			auto LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
-			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+		// Step 8: Handle errors
+		.Then([this, LeaveLobbyDuringJoin](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp, UE::Online::TDefaultErrorResultInternal<UE::Online::FLobbyServiceSnapshot>&& Result)
+		{
+			auto LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
+			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 			const auto& Params = InAsyncOp.GetParams();
 
 			if (Result.IsError())
@@ -639,11 +640,11 @@ namespace PoFigGames::Online
 
 			return MakeFulfilledPromise<void>().GetFuture();
 		})
-		// Step 7. Set member attributes.
+		// Step 9. Set member attributes.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -666,13 +667,13 @@ namespace PoFigGames::Online
 
 			return ModifyLobbyDataImpl(MoveTemp(ModifyLobbyDataParams));
 		})
-		// Step 8. Handle result.
+		// Step 10. Handle result.
 		.Then([this, LeaveLobbyDuringJoin](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp, UE::Online::TDefaultErrorResult<FLobbiesModifyLobbyDataImpl>&& Result)
 		{
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::JoinLobby] ModifyLobbyMemberDataImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -682,11 +683,11 @@ namespace PoFigGames::Online
 
 			return MakeFulfilledPromise<void>().GetFuture();
 		})
-		// Step 9. Bookkeeping and notifications.
+		// Step 11. Bookkeeping and notifications.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FJoinLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// An invitation that has been acted on is spent.
 			if (const TSharedPtr<FLobbyInviteDataSteam> InviteData = GetActiveInvite(Params.LocalAccountId, Params.LobbyId))
@@ -721,7 +722,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FLeaveLobby>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -745,7 +746,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -757,7 +758,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FLeaveLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -785,7 +786,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::LeaveLobby] LeaveLobbyImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -795,7 +796,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FLeaveLobby>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// This user is no longer in the lobby.
 			// The data itself lives until the last reference to it goes.
@@ -805,7 +806,7 @@ namespace PoFigGames::Online
 			// Write the change through and tell whoever is listening.
 			LobbyData->GetLobbyClientData()->CommitClientChanges({ &LobbyEvents });
 
-			UE_LOG(LogOnlineServicesSteam, Log, TEXT("[FLobbiesSteam::LeaveLobby] Succeeded: User [%s], Lobby %s]"),
+			UE_LOG(LogOnlineServicesSteam, Log, TEXT("[FLobbiesSteam::LeaveLobby] Succeeded: User [%s], Lobby [%s]"),
 				*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()));
 
 			InAsyncOp.SetResult(UE::Online::FLeaveLobby::Result { });
@@ -823,7 +824,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FInviteLobbyMember>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -847,7 +848,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -859,7 +860,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FInviteLobbyMember>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			FLobbiesInviteLobbyMemberImpl::Params InviteParams;
 			InviteParams.LobbyData = LobbyData;
@@ -874,7 +875,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::InviteLobbyMember] InviteLobbyMemberImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -886,7 +887,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FInviteLobbyMember>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FLobbiesSteam::InviteLobbyMember] Succeeded: User [%s], Lobby [%s]"),
 				*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()));
@@ -908,9 +909,16 @@ namespace PoFigGames::Online
 			return;
 		}
 
-		if (const auto PresenceLobby = GetPresenceLobby({ .LocalAccountId = LocalAccountId }); PresenceLobby.IsOk())
+		// Every lobby this user is in, not only the one presence points at: a lobby made before the server
+		// came up has no announcement of its own left to wait for, and presence is about what friends see
+		// rather than about which lobby a server belongs to. A lobby somebody else owns is turned away by
+		// the call itself, which is the only thing that decides.
+		if (const auto Lobbies = ActiveLobbies.Find(LocalAccountId))
 		{
-			BindGameServerToOwnedLobby(LobbyDataRegistry.IsValid() ? LobbyDataRegistry->Find(PresenceLobby.GetOkValue().Lobby->LobbyId) : nullptr);
+			for (const auto& LobbyData : *Lobbies)
+			{
+				BindGameServerToOwnedLobby(LobbyData);
+			}
 		}
 	}
 
@@ -1054,7 +1062,7 @@ namespace PoFigGames::Online
 				return;
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+			InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 		})
 		// Step 2: Ask the member to leave.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FKickLobbyMember>& InAsyncOp)
@@ -1062,7 +1070,7 @@ namespace PoFigGames::Online
 			const auto& Params = InAsyncOp.GetParams();
 
 			FLobbiesKickLobbyMemberImpl::Params KickParams;
-			KickParams.LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			KickParams.LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 			KickParams.LocalAccountId = Params.LocalAccountId;
 			KickParams.TargetAccountId = Params.TargetAccountId;
 
@@ -1072,7 +1080,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FKickLobbyMember>& InAsyncOp, UE::Online::TDefaultErrorResult<FLobbiesKickLobbyMemberImpl>&& Result)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			if (Result.IsError())
 			{
@@ -1323,7 +1331,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FPromoteLobbyMember>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -1347,7 +1355,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -1359,7 +1367,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FPromoteLobbyMember>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -1402,7 +1410,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::FPromoteLobbyMember] PromoteLobbyMemberImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -1413,7 +1421,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FPromoteLobbyMember>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Write the change through and tell whoever is listening.
 			LobbyData->GetLobbyClientData()->CommitClientChanges({ &LobbyEvents });
@@ -1436,7 +1444,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyJoinPolicy>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -1460,7 +1468,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -1471,7 +1479,7 @@ namespace PoFigGames::Online
 		// Step 2: Modify lobby join policy
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyJoinPolicy>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -1499,7 +1507,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::ModifyLobbyJoinPolicy] ModifyLobbyDataImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -1511,7 +1519,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyJoinPolicy>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Write the change through and tell whoever is listening.
 			LobbyData->GetLobbyClientData()->CommitClientChanges({ &LobbyEvents });
@@ -1533,7 +1541,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyAttributes>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -1557,7 +1565,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -1569,7 +1577,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyAttributes>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -1598,7 +1606,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::ModifyLobbyAttributes] ModifyLobbyMemberDataImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -1610,7 +1618,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyAttributes>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Write the change through and tell whoever is listening.
 			LobbyData->GetLobbyClientData()->CommitClientChanges({ &LobbyEvents });
@@ -1632,7 +1640,7 @@ namespace PoFigGames::Online
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyMemberAttributes>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
 
-			if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+			if (const auto Auth = Services.GetAuthInterface())
 			{
 				if (!Auth->IsLoggedIn(Params.LocalAccountId))
 				{
@@ -1656,7 +1664,7 @@ namespace PoFigGames::Online
 					return;
 				}
 
-				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LOBBY_DATA_KEY_NAME, LobbyData.ToSharedRef());
+				InAsyncOp.Data.Set<TSharedRef<FLobbyDataSteam>>(LobbyDataKey, LobbyData.ToSharedRef());
 			}
 			else
 			{
@@ -1668,7 +1676,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyMemberAttributes>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			UE::Online::FLobbyClientDataPrepareClientChanges::Params PrepareParams;
 			PrepareParams.LocalAccountId = Params.LocalAccountId;
@@ -1697,7 +1705,7 @@ namespace PoFigGames::Online
 			if (Result.IsError())
 			{
 				const auto& Params = InAsyncOp.GetParams();
-				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+				const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::ModifyLobbyMemberAttributes] ModifyLobbyMemberDataImpl Failed: User [%s], Lobby [%s], Result [%s]"),
 					*ToLogString(Params.LocalAccountId), *ToLogString(LobbyData->GetLobbySteamId()), *Result.GetErrorValue().GetLogString());
@@ -1709,7 +1717,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FModifyLobbyMemberAttributes>& InAsyncOp)
 		{
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LOBBY_DATA_KEY_NAME);
+			const auto& LobbyData = GetOpDataChecked<TSharedRef<FLobbyDataSteam>>(InAsyncOp, LobbyDataKey);
 
 			// Write the change through and tell whoever is listening.
 			LobbyData->GetLobbyClientData()->CommitClientChanges({ &LobbyEvents });
@@ -1726,20 +1734,27 @@ namespace PoFigGames::Online
 
 	UE::Online::TOnlineResult<UE::Online::FGetJoinedLobbies> FLobbiesSteam::GetJoinedLobbies(UE::Online::FGetJoinedLobbies::Params&& Params)
 	{
+		// Being in no lobby is an answer, and an empty list is how it is given: the table below only holds a
+		// user who has joined something, so its silence says nothing about whether the user exists. That is
+		// asked separately, and is the only thing this refuses.
+		if (auto LocalUser = ResolveLocalSteamUser(Params.LocalAccountId, TEXT("FLobbiesSteam::GetJoinedLobbies")); LocalUser.IsError())
+		{
+			return UE::Online::TOnlineResult<UE::Online::FGetJoinedLobbies>(MoveTemp(LocalUser.GetErrorValue()));
+		}
+
+		UE::Online::FGetJoinedLobbies::Result Result;
+
 		if (const TSet<TSharedRef<FLobbyDataSteam>>* Lobbies = ActiveLobbies.Find(Params.LocalAccountId))
 		{
-			UE::Online::FGetJoinedLobbies::Result Result;
 			Result.Lobbies.Reserve(Lobbies->Num());
 
 			for (const auto& LobbyDataSteam : *Lobbies)
 			{
 				Result.Lobbies.Emplace(LobbyDataSteam->GetLobbyClientData()->GetPublicDataPtr());
 			}
-
-			return UE::Online::TOnlineResult<UE::Online::FGetJoinedLobbies>(MoveTemp(Result));
 		}
 
-		return UE::Online::TOnlineResult<UE::Online::FGetJoinedLobbies>(UE::Online::Errors::InvalidUser());
+		return UE::Online::TOnlineResult<UE::Online::FGetJoinedLobbies>(MoveTemp(Result));
 	}
 
 	UE::Online::TOnlineResult<UE::Online::FGetReceivedInvitations> FLobbiesSteam::GetReceivedInvitations(UE::Online::FGetReceivedInvitations::Params&& Params)
@@ -1800,7 +1815,7 @@ namespace PoFigGames::Online
 
 	TFuture<UE::Online::TDefaultErrorResult<FLobbiesLeaveLobbyImpl>> FLobbiesSteam::LeaveLobbyImpl(FLobbiesLeaveLobbyImpl::Params&& Params) const
 	{
-		if (const UE::Online::IAuthPtr Auth = Services.GetAuthInterface())
+		if (const auto Auth = Services.GetAuthInterface())
 		{
 			if (!Auth->IsLoggedIn(Params.LocalAccountId))
 			{
@@ -1993,7 +2008,7 @@ namespace PoFigGames::Online
 
 			if (!LobbyDetails.IsValid())
 			{
-				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::ProcessLobbyNotificationImplOp] Failed: Unable to find active lobby details to process notificaions. Lobby[%s]"),
+				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FLobbiesSteam::ProcessLobbyNotificationImplOp] Failed: Unable to find active lobby details to process notifications. Lobby[%s]"),
 					*ToLogString(LobbyData->GetLobbySteamId()));
 
 				InAsyncOp.SetError(UE::Online::Errors::InvalidState());
@@ -2001,7 +2016,7 @@ namespace PoFigGames::Online
 				return UE::Online::TDefaultErrorResultInternal<UE::Online::FLobbyServiceSnapshot>(UE::Online::Errors::InvalidState());
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LOBBY_DETAILS_KEY_NAME, LobbyDetails.ToSharedRef());
+			InAsyncOp.Data.Set<TSharedRef<FLobbyDetailsSteam>>(LobbyDetailsKey, LobbyDetails.ToSharedRef());
 
 			// Take the snapshot; doing so is what resolves the account id of every member in it.
 			return LobbyDetails->GetLobbySnapshot(true);
@@ -2009,7 +2024,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<FLobbiesProcessLobbyNotificationImpl>& InAsyncOp, UE::Online::TDefaultErrorResultInternal<UE::Online::FLobbyServiceSnapshot>&& LobbySnapshotResult)
 		{
 			const auto& [LobbyData, MutatedMembers, LeavingMembers] = InAsyncOp.GetParams();
-			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LOBBY_DETAILS_KEY_NAME);
+			const auto LobbyDetails = GetOpDataChecked<TSharedRef<FLobbyDetailsSteam>>(InAsyncOp, LobbyDetailsKey);
 
 			if (LobbySnapshotResult.IsError())
 			{

@@ -55,7 +55,7 @@ namespace PoFigGames::Online
 		{
 			const auto& Params = InAsyncOp.GetParams();
 
-			const UE::Online::IAuthPtr Auth = Services.GetAuthInterface();
+			const auto Auth = Services.GetAuthInterface();
 			if (!Auth.IsValid())
 			{
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FUserInfoSteam::QueryUserInfo] Failed: Authentication Interface is not found"));
@@ -110,7 +110,7 @@ namespace PoFigGames::Online
 		{
 			const auto& Params = InAsyncOp.GetParams();
 
-			const UE::Online::IAuthPtr Auth = Services.GetAuthInterface();
+			const auto Auth = Services.GetAuthInterface();
 			if (!Auth.IsValid())
 			{
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FUserInfoSteam::QueryUserAvatar] Failed: Authentication Interface is not found"));

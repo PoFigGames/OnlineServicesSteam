@@ -12,7 +12,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamWriteUserFile
 	 *
-	 * Writes one file into the cloud storage of the local user.
+	 * @brief Writes one file into the cloud storage of the local user.
 	 *
 	 * The synchronous call of the same name blocks the game until the file has been handed over, so the
 	 * asynchronous one is used instead: Steam takes a copy of the data and answers when it is done.
@@ -66,7 +66,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamReadUserFile
 	 *
-	 * Reads one file out of the cloud storage of the local user.
+	 * @brief Reads one file out of the cloud storage of the local user.
 	 *
 	 * Steam hands the bytes over only once the read is acknowledged, and forgets them as soon as they have
 	 * been collected, so they are taken as the answer is converted rather than left for later.

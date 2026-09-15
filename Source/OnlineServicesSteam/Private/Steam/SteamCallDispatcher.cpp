@@ -11,10 +11,11 @@
 
 namespace PoFigGames::Steam
 {
-	FSteamPendingRequest::FSteamPendingRequest(FSteamCallDispatcher& InDispatcher, const TCHAR* InOpName, const double InDeadlineSeconds)
+	FSteamPendingRequest::FSteamPendingRequest(FSteamCallDispatcher& InDispatcher, const TCHAR* InOpName, const double InTimeoutSeconds)
 		: Dispatcher(&InDispatcher)
 		, OpName(InOpName)
-		, DeadlineSeconds(InDeadlineSeconds)
+		, TimeoutSeconds(InTimeoutSeconds)
+		, DeadlineSeconds(FPlatformTime::Seconds() + InTimeoutSeconds)
 	{
 	}
 
@@ -73,7 +74,7 @@ namespace PoFigGames::Steam
 		for (const auto& ExpiredRequest : ExpiredRequests)
 		{
 			UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[Steam] %s Failed: timed out after %.1f seconds"),
-				ExpiredRequest->GetOpName(), Config.RequestTimeoutSeconds);
+				ExpiredRequest->GetOpName(), ExpiredRequest->GetTimeoutSeconds());
 
 			ExpiredRequest->FulfilWithError(UE::Online::Errors::Timeout());
 		}

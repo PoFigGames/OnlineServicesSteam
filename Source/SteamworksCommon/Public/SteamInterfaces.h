@@ -107,7 +107,11 @@ namespace PoFigGames::Steam
 		template<typename InterfaceType>
 		struct TSteamInterfaceTraits;
 
-		/** An interface only the client API offers. */
+		/**
+		 * @struct TSteamClientInterface
+		 *
+		 * @brief An interface only the client API offers; the game server API answers null for it.
+		 */
 		template<typename InterfaceType, InterfaceType* FSteamClientInterfaces::* ClientMember>
 		struct TSteamClientInterface
 		{
@@ -115,7 +119,11 @@ namespace PoFigGames::Steam
 			static InterfaceType* FromServer(const FSteamServerInterfaces& /*Interfaces*/) { return nullptr; }
 		};
 
-		/** An interface only the game server API offers. */
+		/**
+		 * @struct TSteamServerInterface
+		 *
+		 * @brief An interface only the game server API offers; the client API answers null for it.
+		 */
 		template<typename InterfaceType, InterfaceType* FSteamServerInterfaces::* ServerMember>
 		struct TSteamServerInterface
 		{
@@ -123,7 +131,11 @@ namespace PoFigGames::Steam
 			static InterfaceType* FromServer(const FSteamServerInterfaces& Interfaces) { return Interfaces.*ServerMember; }
 		};
 
-		/** An interface both APIs offer. */
+		/**
+		 * @struct TSteamSharedInterface
+		 *
+		 * @brief An interface both APIs offer, each from its own set.
+		 */
 		template<typename InterfaceType, InterfaceType* FSteamClientInterfaces::* ClientMember, InterfaceType* FSteamServerInterfaces::* ServerMember>
 		struct TSteamSharedInterface
 		{

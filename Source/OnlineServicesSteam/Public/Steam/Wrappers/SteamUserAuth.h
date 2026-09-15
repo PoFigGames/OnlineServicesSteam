@@ -42,6 +42,14 @@ namespace PoFigGames::Steam
 			{
 				/** Filled in by Invoke and handed on by MakeResult: the request owns the ticket it issued. */
 				TSharedRef<FSteamAuthTicketData> Ticket { MakeShared<FSteamAuthTicketData>() };
+
+				/**
+				 * Who the ticket is for, when the caller knows. Steam then refuses it to anybody else: an
+				 * identity binds it to that account, an address to that address (isteamuser.h:127-129, read
+				 * on 2026-09-15). Left invalid the ticket is good anywhere, and a host it is shown to can
+				 * show it on somewhere else.
+				 */
+				SteamNetworkingIdentity Target { };
 			};
 
 			struct Result
@@ -63,9 +71,9 @@ namespace PoFigGames::Steam
 
 				uint32 TicketSize { 0 };
 
-				// The remote identity is not known where the ticket is issued, so it is bound to none. A host
-				// which needs a bound ticket has to be named by whoever asks for it.
-				In.Ticket->TicketHandle = Interface->GetAuthSessionTicket(In.Ticket->TicketBytes.GetData(), In.Ticket->TicketBytes.Num(), &TicketSize, nullptr);
+				const SteamNetworkingIdentity* Target = In.Target.IsInvalid() ? nullptr : &In.Target;
+
+				In.Ticket->TicketHandle = Interface->GetAuthSessionTicket(In.Ticket->TicketBytes.GetData(), In.Ticket->TicketBytes.Num(), &TicketSize, Target);
 
 				if (In.Ticket->TicketHandle == k_HAuthTicketInvalid)
 				{
@@ -172,6 +180,12 @@ namespace PoFigGames::Steam
 		{
 			static constexpr TCHAR Name[] = TEXT("SteamGameServerLogOn");
 
+			/** Steam takes the logon on a round trip of its own; see CSteamBackendOp. */
+			static constexpr bool bWaitsOnBackend { true };
+
+			/** Asked for through the game server API, so answered on its pipe; see CSteamPipedOp. */
+			static bool UsesGameServerPipe() { return true; }
+
 			using SteamCallbackMsgType = SteamServersConnected_t;
 
 			struct Params
@@ -185,7 +199,7 @@ namespace PoFigGames::Steam
 
 			static ESteamInvokeState Invoke(const Params& /*In*/, TSteamResultOf<Result>& OutResult)
 			{
-				ISteamGameServer* GameServer = GetSteamInterface<ISteamGameServer>();
+				const auto GameServer = GetSteamInterface<ISteamGameServer>();
 				if (GameServer == nullptr)
 				{
 					OutResult = TSteamResultOf<Result>(UE::Online::Errors::MissingInterface());
@@ -209,7 +223,7 @@ namespace PoFigGames::Steam
 
 			static TSteamResultOf<Result> MakeResult(const Params& /*In*/, const SteamCallbackMsgType& /*Message*/)
 			{
-				ISteamGameServer* GameServer = GetSteamInterface<ISteamGameServer>();
+				const auto GameServer = GetSteamInterface<ISteamGameServer>();
 				if (GameServer == nullptr)
 				{
 					return TSteamResultOf<Result>(UE::Online::Errors::MissingInterface());
@@ -283,6 +297,17 @@ namespace PoFigGames::Steam
 				CSteamID OwnerUserId { k_steamIDNil };
 			};
 
+			/** Steam looks at the account behind the ticket on a round trip of its own; see CSteamBackendOp. */
+			static constexpr bool bWaitsOnBackend { true };
+
+			/**
+			 * Which API this call goes through, and therefore which pipe answers it; see CSteamPipedOp.
+			 *
+			 * A process holding a game server verifies through it even when it also holds a client, because
+			 * the session belongs to the server the player is joining.
+			 */
+			static bool UsesGameServerPipe() { return GetSteamInterface<ISteamGameServer>() != nullptr; }
+
 			/** A dedicated server verifies through the game server API; a listen server through the client one. */
 			static ESteamInvokeState Invoke(const Params& In, TSteamResultOf<Result>& OutResult)
 			{
@@ -294,9 +319,9 @@ namespace PoFigGames::Steam
 
 				EBeginAuthSessionResult BeginResult { k_EBeginAuthSessionResultInvalidTicket };
 
-				if (ISteamGameServer* GameServer = GetSteamInterface<ISteamGameServer>())
+				if (UsesGameServerPipe())
 				{
-					BeginResult = GameServer->BeginAuthSession(In.TicketBytes.GetData(), In.TicketBytes.Num(), In.RemoteUserId);
+					BeginResult = GetSteamInterface<ISteamGameServer>()->BeginAuthSession(In.TicketBytes.GetData(), In.TicketBytes.Num(), In.RemoteUserId);
 				}
 				else if (ISteamUser* User = GetSteamInterface<ISteamUser>())
 				{

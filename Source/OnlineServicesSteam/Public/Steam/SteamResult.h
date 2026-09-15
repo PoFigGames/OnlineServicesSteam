@@ -4,9 +4,9 @@
 
 #include <type_traits>
 
-#include "OnlineServicesSteamLogChannels.h"
 #include "Online/OnlineAsyncOp.h"
 #include "Online/OnlineErrorSteam.h"
+#include "OnlineServicesSteamLogChannels.h"
 
 
 namespace PoFigGames::Steam
@@ -14,7 +14,8 @@ namespace PoFigGames::Steam
 	/**
 	 * @class TSteamResultOf
 	 *
-	 * Result of a Steam API wrapper: either the wrapper's own result type or an FOnlineError.
+	 * @brief Result of a Steam API wrapper: either the wrapper's own result type or an FOnlineError.
+	 *
 	 * Spelled in terms of the result type so that it can be used inside the wrapper declaration itself.
 	 */
 	template<typename ResultType>
@@ -23,8 +24,10 @@ namespace PoFigGames::Steam
 	/**
 	 * @class TSteamResult
 	 *
-	 * Result of a Steam API wrapper, spelled in terms of the wrapper. Every wrapper reports failure through
-	 * this type, so the native EResult is never lost on the way to the operation step that decides what to do.
+	 * @brief Result of a Steam API wrapper, spelled in terms of the wrapper.
+	 *
+	 * Every wrapper reports failure through this type, so the native EResult is never lost on the way to the
+	 * operation step that decides what to do.
 	 */
 	template<typename OpType>
 	using TSteamResult = TSteamResultOf<typename OpType::Result>;
@@ -45,7 +48,13 @@ namespace PoFigGames::Steam
 
 	namespace Private
 	{
-		/** Extracts the operation type from a continuation of the form void(TOnlineAsyncOp<OpType>&, ValueType). */
+		/**
+		 * @struct TSteamContinuationTraits
+		 *
+		 * @brief Extracts the operation type from a continuation of the form
+		 * void(TOnlineAsyncOp<OpType>&, ValueType). The specialisations below read it off the call operator,
+		 * const and non-const alike.
+		 */
 		template<typename CallableType>
 		struct TSteamContinuationTraits : TSteamContinuationTraits<decltype(&std::remove_reference_t<CallableType>::operator())>
 		{
@@ -66,9 +75,10 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct TSteamUnwrapContinuation
 		 *
-		 * Operation step which turns a failed Steam call into an operation error and forwards a successful
-		 * value on to the wrapped step. Written as a functor rather than a lambda because TOnlineAsyncOp::Then
-		 * deduces the step signature from operator().
+		 * @brief Operation step which turns a failed Steam call into an error and forwards a successful value.
+		 *
+		 * Written as a functor rather than a lambda because TOnlineAsyncOp::Then deduces the step signature
+		 * from operator().
 		 */
 		template<typename SteamOpType, typename OpType, typename CallableType>
 		struct TSteamUnwrapContinuation

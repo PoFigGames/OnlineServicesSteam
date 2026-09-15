@@ -7,7 +7,8 @@
 #include "NetDriverSteam.generated.h"
 
 
-namespace PoFigGames::Steam {
+namespace PoFigGames::Steam
+{
 	class FSocketSubsystemSteam;
 	class FSocketSteam;
 }
@@ -45,7 +46,7 @@ public:
 	ONLINESOCKETSSTEAM_API virtual void LowLevelDestroy() override;
 	ONLINESOCKETSSTEAM_API virtual ISocketSubsystem* GetSocketSubsystem() override;
 	ONLINESOCKETSSTEAM_API virtual bool IsNetResourceValid() override;
-#pragma endregion
+#pragma endregion NetDriver
 
 	ONLINESOCKETSSTEAM_API bool ArePacketHandlersDisabled() const;
 
@@ -61,6 +62,17 @@ public:
 	static ONLINESOCKETSSTEAM_API ISteamNetworkingSockets* GetNetworkingSockets();
 
 protected:
+	/**
+	 * Longest one dispatch may spend reading packets, and how many packets it reads between two checks of
+	 * that. Either at zero leaves the dispatch reading until the sockets are empty, which is how UIpNetDriver
+	 * ships the same pair (IpNetDriver.h:323-329, checked on 2026-09-16).
+	 */
+	UPROPERTY(Config)
+	double MaxSecondsInReceive { 0.0 };
+
+	UPROPERTY(Config)
+	int32 NbPacketsBetweenReceiveTimeTest { 0 };
+
 	TSharedPtr<PoFigGames::Steam::FSocketSteam> Socket { nullptr };
 
 	bool bIsDelayedNetworkAccess { false };
@@ -68,10 +80,16 @@ protected:
 
 	ONLINESOCKETSSTEAM_API void ResetSocketInfo(const TSharedPtr<PoFigGames::Steam::FSocketSteam>& RemovedSocket);
 
+	/** Opens the reading budget of this dispatch; see MaxSecondsInReceive. */
+	ONLINESOCKETSSTEAM_API void BeginReceiveBudget();
+
+	/** Whether this dispatch has read for longer than it is allowed to. Called once per packet. */
+	ONLINESOCKETSSTEAM_API bool IsReceiveBudgetSpent();
+
 	ONLINESOCKETSSTEAM_API UNetConnection* FindClientConnectionForHandle(uint32 SocketHandle);
 
-	/** The connection speaking to one Steam identity, which is all a connectionless message names. */
-	ONLINESOCKETSSTEAM_API UNetConnection* FindClientConnectionForIdentity(uint64 SteamId);
+	/** The connection speaking to one peer, looked up rather than searched for: this runs once per packet. */
+	ONLINESOCKETSSTEAM_API UNetConnection* FindClientConnectionForPeer(const TSharedRef<const FInternetAddr>& PeerAddress);
 
 	/**
 	 * Takes in whatever the connectionless transport has to offer this frame.
@@ -90,4 +108,9 @@ protected:
 	ONLINESOCKETSSTEAM_API void OnConnectionCreated(uint32 ListenParentHandle, uint32 SocketHandle);
 	ONLINESOCKETSSTEAM_API void OnConnectionUpdated(uint32 SocketHandle, int32 NewState);
 	ONLINESOCKETSSTEAM_API void OnConnectionDisconnected(uint32 SocketHandle);
+
+private:
+	/** When this dispatch has to stop reading, and how many packets are left until that is tested again. */
+	double ReceiveBailOutTime { 0.0 };
+	int32  PacketsUntilReceiveTimeTest { 0 };
 };

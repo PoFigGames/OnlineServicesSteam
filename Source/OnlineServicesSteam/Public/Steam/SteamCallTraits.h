@@ -16,7 +16,7 @@ namespace PoFigGames::Steam
 	/**
 	 * @enum ESteamInvokeState
 	 *
-	 * Outcome of starting a request whose answer arrives on a broadcast Steam callback.
+	 * @brief Outcome of starting a request whose answer arrives on a broadcast Steam callback.
 	 */
 	enum class ESteamInvokeState : uint8
 	{
@@ -29,8 +29,9 @@ namespace PoFigGames::Steam
 	/**
 	 * @struct CSteamOp
 	 *
-	 * Common part of every Steam API wrapper: the parameters it takes, the result it produces and a name
-	 * used for logging and diagnostics.
+	 * @brief Common part of every Steam API wrapper.
+	 *
+	 * The parameters it takes, the result it produces, and a name used for logging and diagnostics.
 	 */
 	template<typename OpType>
 	concept CSteamOp = requires
@@ -41,9 +42,33 @@ namespace PoFigGames::Steam
 	};
 
 	/**
+	 * @struct CSteamBackendOp
+	 *
+	 * @brief An operation whose answer comes from a Steam backend rather than from the client beside us.
+	 *
+	 * Valve documents these as taking as long as they take, so they are given a deadline of their own and
+	 * are not read as refused when they are merely slow.
+	 */
+	template<typename OpType>
+	concept CSteamBackendOp = requires { requires OpType::bWaitsOnBackend; };
+
+	/**
+	 * @struct CSteamPipedOp
+	 *
+	 * @brief An operation that says for itself which of Steam's two callback pipes answers it.
+	 *
+	 * Steam answers on the pipe of the API the call was made through, which is not always the one this
+	 * process would otherwise use: a listen server holds both, and a call it makes through the game server
+	 * API is answered there and nowhere else.
+	 */
+	template<typename OpType>
+	concept CSteamPipedOp = requires { { OpType::UsesGameServerPipe() } -> std::convertible_to<bool>; };
+
+	/**
 	 * @struct CSteamCallResultOp
 	 *
-	 * Wrapper for a Steam API which answers through CCallResult, that is one response per call.
+	 * @brief Wrapper for a Steam API which answers through CCallResult, that is one response per call.
+	 *
 	 * Invoke issues the call and returns its handle; MakeResult converts the response payload, mapping
 	 * any failure onto an FOnlineError.
 	 */
@@ -59,7 +84,8 @@ namespace PoFigGames::Steam
 	/**
 	 * @struct CSteamCallbackOp
 	 *
-	 * Wrapper for a Steam API whose answer arrives on a broadcast callback shared by every listener.
+	 * @brief Wrapper for a Steam API whose answer arrives on a broadcast callback shared by every listener.
+	 *
 	 * Invoke starts the request and reports whether an answer is still expected; IsMatch tells the
 	 * request's own answer apart from everybody else's.
 	 */
@@ -76,8 +102,9 @@ namespace PoFigGames::Steam
 	/**
 	 * @struct CSteamSyncOp
 	 *
-	 * Wrapper for a Steam API which answers immediately. Kept in the same shape as the asynchronous ones
-	 * so that failures are reported the same way everywhere.
+	 * @brief Wrapper for a Steam API which answers immediately.
+	 *
+	 * Kept in the same shape as the asynchronous ones so that failures are reported the same way everywhere.
 	 */
 	template<typename OpType>
 	concept CSteamSyncOp = CSteamOp<OpType>

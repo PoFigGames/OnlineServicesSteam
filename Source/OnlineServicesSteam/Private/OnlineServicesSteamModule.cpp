@@ -17,21 +17,23 @@ DEFINE_LOG_CATEGORY(LogOnlineServicesSteam);
 
 
 /**
- * FOnlineServicesFactorySteam
+ * @class FOnlineServicesFactorySteam
+ *
+ * @brief Builds an FOnlineServicesSteam for the registry.
  */
 class FOnlineServicesFactorySteam final : public UE::Online::IOnlineServicesFactory
 {
 public:
 	FOnlineServicesFactorySteam() = default;
 	virtual ~FOnlineServicesFactorySteam() override = default;
-	
+
 	virtual TSharedPtr<UE::Online::IOnlineServices> Create(FName InInstanceName, FName InstanceConfigName) override
 	{
 		if (auto Service = MakeShared<PoFigGames::Online::FOnlineServicesSteam>(InInstanceName, InstanceConfigName); Service->PreInit())
 		{
 			return Service;
 		}
-		
+
 		return nullptr;
 	}
 };
@@ -44,8 +46,8 @@ int FOnlineServicesSteamModule::GetRegistryPriority()
 void FOnlineServicesSteamModule::StartupModule()
 {
 	FModuleManager& ModuleManager = FModuleManager::Get();
-	
-	// Making sure we load the modules at this point will avoid errors while cooking	
+
+	// Making sure we load the modules at this point will avoid errors while cooking
 	static const FName SteamworksCommonModuleName = TEXT("SteamworksCommon");
 	if (!ModuleManager.IsModuleLoaded(SteamworksCommonModuleName))
 	{
@@ -69,7 +71,7 @@ void FOnlineServicesSteamModule::StartupModule()
 void FOnlineServicesSteamModule::ShutdownModule()
 {
 	UE::Online::FOnlineIdRegistryRegistry& OnlineIdRegistryRegistry = UE::Online::FOnlineIdRegistryRegistry::Get();
-	
+
 	OnlineIdRegistryRegistry.UnregisterAccountIdRegistry(UE::Online::EOnlineServices::Steam);
 
 	UE::Online::FOnlineServicesRegistry::Get().UnregisterServicesFactory(UE::Online::EOnlineServices::Steam);

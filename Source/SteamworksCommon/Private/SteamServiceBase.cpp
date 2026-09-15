@@ -22,7 +22,7 @@ DEFINE_LOG_CATEGORY(LogSteamService);
 
 namespace PoFigGames::Steam
 {
-#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR
+#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR && !UE_BUILD_TEST
 	namespace Private
 	{
 		static const FString& GetSteamAppIdFilename()
@@ -120,7 +120,7 @@ namespace PoFigGames::Steam
 			GamePort = DefaultGamePort;
 		}
 
-	#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR
+	#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR && !UE_BUILD_TEST
 		// Only a process the Steam client did not start needs this file; one launched through the client is
 		// told its app id by the environment. Writing it is also what makes bRelaunchInSteam do nothing in a
 		// development build, which is wanted: a build started from an IDE should not be bounced into Steam.
@@ -133,18 +133,13 @@ namespace PoFigGames::Steam
 
 		bInitialized = InternalInit();
 
-		if (bInitialized)
-		{
-			UE_LOG(LogSteamService, Log, TEXT("Steam API initialized"));
-		}
-	#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR
-		else
-		{
-			// The file belongs to an API which came up. One that did not leaves the directory as it found it,
-			// because the Steam client will not relaunch a process which has a steam_appid.txt beside it, and
-			// a file left over from a failed run would disable that for every later run out of this directory.
-			Private::DeleteSteamAppIdFromDisk();
-		}
+		UE_CLOG(bInitialized, LogSteamService, Log, TEXT("Steam API initialized"));
+
+	#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR && !UE_BUILD_TEST
+		// Steam reads the file while the API is coming up and never afterwards, so it goes as soon as that
+		// is over. Left behind - which is what a crash used to do - it stops the client relaunching any
+		// later run out of this directory.
+		Private::DeleteSteamAppIdFromDisk();
 	#endif
 
 		return bInitialized;
@@ -156,10 +151,6 @@ namespace PoFigGames::Steam
 
 		if (CanCleanUp())
 		{
-		#if !UE_BUILD_SHIPPING && !UE_BUILD_SHIPPING_WITH_EDITOR
-			Private::DeleteSteamAppIdFromDisk();
-		#endif
-
 			InternalShutdown();
 
 			UE_LOG(LogSteamService, Log, TEXT("Steamworks API shut down"));
@@ -224,12 +215,13 @@ namespace PoFigGames::Steam
 
 	const FSteamPlatformConfig* GetRunningSteamConfig()
 	{
-		if (const TSharedPtr<FSteamServiceBase>& ClientService = Private::GetSteamServiceSlot(ESteamApi::Client))
+		// A slot also holds a service whose API never came up, which has a configuration but nothing running.
+		if (const TSharedPtr<FSteamServiceBase>& ClientService = Private::GetSteamServiceSlot(ESteamApi::Client); ClientService.IsValid() && ClientService->IsValid())
 		{
 			return &ClientService->GetConfig();
 		}
 
-		if (const TSharedPtr<FSteamServiceBase>& ServerService = Private::GetSteamServiceSlot(ESteamApi::GameServer))
+		if (const TSharedPtr<FSteamServiceBase>& ServerService = Private::GetSteamServiceSlot(ESteamApi::GameServer); ServerService.IsValid() && ServerService->IsValid())
 		{
 			return &ServerService->GetConfig();
 		}

@@ -70,19 +70,19 @@ namespace PoFigGames::Online
 		auto& ImageWrapperModule = FModuleManager::GetModuleChecked<IImageWrapperModule>("ImageWrapper");
 		const auto ImageWrapper = ImageWrapperModule.CreateImageWrapper(EImageFormat::PNG);
 
-		if (not ImageWrapper.IsValid())
+		if (!ImageWrapper.IsValid())
 		{
 			UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FUserInfoUtils::SaveImageToFile] IImageWrapperModule::CreateImageWrapper Failed"));
 			return UE::Online::Errors::InvalidResults();
 		}
 
-		if (not ImageWrapper->SetRaw(RawImage.GetData(), RawImage.Num(), ImageWidth, ImageHeight, ERGBFormat::RGBA, 8))
+		if (!ImageWrapper->SetRaw(RawImage.GetData(), RawImage.Num(), ImageWidth, ImageHeight, ERGBFormat::RGBA, 8))
 		{
 			UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FUserInfoUtils::SaveImageToFile] IImageWrapper::SetRaw Failed"));
 			return UE::Online::Errors::InvalidResults();
 		}
 
-		if (not FFileHelper::SaveArrayToFile(ImageWrapper->GetCompressed(ImageQuality), *ImagePath))
+		if (!FFileHelper::SaveArrayToFile(ImageWrapper->GetCompressed(ImageQuality), *ImagePath))
 		{
 			UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FUserInfoUtils::SaveImageToFile] FFileHelper::SaveArrayToFile Failed: Path [%s]"), *ImagePath);
 			return UE::Online::Errors::InvalidResults();

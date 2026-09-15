@@ -2,13 +2,11 @@
 
 #include "AuthHandlerSteam.h"
 
-#include "Containers/Ticker.h"
-#include "Engine/Engine.h"
-#include "Engine/World.h"
-#include "GameFramework/GameModeBase.h"
-#include "GameFramework/GameSession.h"
-#include "GameFramework/PlayerController.h"
-#include "GameFramework/PlayerState.h"
+#include "Engine/NetDriver.h"
+#include "NetConnectionSteam.h"
+#include "Net/Core/Connection/NetCloseResult.h"
+#include "OnlineSocketsSteamModule.h"
+#include "SocketSubsystemSteam.h"
 #include "Online/Auth.h"
 #include "Online/CoreOnline.h"
 #include "Online/OnlineAsyncOpHandle.h"
@@ -67,6 +65,17 @@ namespace PoFigGames::Online::Private
 	};
 
 	/**
+	 * Steam's own ceiling on a ticket, in the hexadecimal form it travels as.
+	 *
+	 * This is what a reader will take, not what a sender can deliver: what fits in one packet is smaller,
+	 * and is the connection's own budget rather than anything Steam decides.
+	 */
+	constexpr int32 LongestTicketText { Steam::MaxAuthSessionTicketSize * 2 };
+
+	/** An account travels as the services put one on a wire, which for Steam is a SteamID and nothing else. */
+	constexpr int32 AccountDataSize { sizeof(uint64) };
+
+	/**
 	 * @struct FAuthTicketMessage
 	 *
 	 * @brief A client saying which account it plays as and offering the proof.
@@ -83,7 +92,35 @@ namespace PoFigGames::Online::Private
 		{
 			FAuthHeader::Serialize(Ar);
 
-			Ar << Account << Ticket;
+			// Both fields take their length from the packet, so both are bounded here rather than after the
+			// fact. The stock array operator answers a lie with an ensure at sixteen megabytes and the
+			// string operator with nothing at all: it allocates whatever the count said and then scans it.
+			auto AccountSize = Ar.IsLoading() ? 0 : Account.Num();
+
+			Ar << AccountSize;
+
+			if (AccountSize != AccountDataSize)
+			{
+				Ar.SetError();
+
+				return;
+			}
+
+			if (Ar.IsLoading())
+			{
+				Account.SetNumUninitialized(AccountDataSize);
+			}
+
+			Ar.Serialize(Account.GetData(), AccountDataSize);
+
+			const auto PreviousMaxSize = Ar.GetMaxSerializeSize();
+
+			// The count a string carries is the text plus its terminator.
+			Ar.ArMaxSerializeSize = LongestTicketText + 1;
+
+			Ar << Ticket;
+
+			Ar.ArMaxSerializeSize = PreviousMaxSize;
 		}
 
 		friend FArchive& operator<<(FArchive& Ar, FAuthTicketMessage& Message)
@@ -123,106 +160,15 @@ namespace PoFigGames::Online::Private
 	/** A packet left unanswered this long is sent again. */
 	constexpr double ResendAfterSeconds { 2.0 };
 
-	/** Steam's own ceiling on a ticket, in the hexadecimal form it travels as. */
-	constexpr int32 LongestTicketText { Steam::MaxAuthSessionTicketSize * 2 };
-}
-
-namespace PoFigGames::Online::Private
-{
-	/**
-	 * @class FRefusedPlayers
-	 *
-	 * @brief Players the services would not vouch for, kept until a connection for them can be closed.
-	 *
-	 * A verdict arrives after the player is already in the game, and nothing at the handshake knows what a
-	 * player is. The sweep below finds them by the account their player state carries and hands them to
-	 * the game session, which is what closes a connection politely.
-	 */
-	class FRefusedPlayers
+	/** The account a Steam identity belongs to, asked for in the form identities travel in. */
+	static UE::Online::FAccountId ToAccountId(const uint64 SteamId)
 	{
-	public:
-		static FRefusedPlayers& Get()
-		{
-			static FRefusedPlayers Instance;
+		TArray<uint8> ReplicationData;
+		ReplicationData.SetNumUninitialized(sizeof(SteamId));
 
-			return Instance;
-		}
+		FMemory::Memcpy(ReplicationData.GetData(), &SteamId, sizeof(SteamId));
 
-		void Refuse(const FString& AccountId)
-		{
-			if (AccountId.IsEmpty())
-			{
-				return;
-			}
-
-			Refused.AddUnique(AccountId);
-
-			if (!SweepHandle.IsValid())
-			{
-				SweepHandle = FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateRaw(this, &FRefusedPlayers::Sweep), 0.0f);
-			}
-		}
-
-	private:
-		/** Drops everyone on the list who is playing in this world, and forgets them. */
-		void KickFrom(const UWorld& World, AGameSession& Session)
-		{
-			for (auto Iterator = World.GetPlayerControllerIterator(); Iterator; ++Iterator)
-			{
-				const auto Controller = Iterator->Get();
-				const auto PlayerState = Controller ? Controller->PlayerState : nullptr;
-
-				if (PlayerState && Refused.Remove(PlayerState->GetUniqueId().ToString()) > 0)
-				{
-					UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] Dropping %s: the services would not vouch for them."),
-						*PlayerState->GetUniqueId().ToString());
-
-					Session.KickPlayer(Controller,
-						NSLOCTEXT("OnlineSocketsSteam", "AuthRefused", "You could not be verified with the online service."));
-				}
-			}
-		}
-
-		bool Sweep(float /*DeltaTime*/)
-		{
-			if (!GEngine)
-			{
-				return true;
-			}
-
-			for (const auto& Context : GEngine->GetWorldContexts())
-			{
-				const auto World = Context.World();
-				const auto GameMode = World ? World->GetAuthGameMode() : nullptr;
-
-				if (const auto Session = GameMode ? GameMode->GameSession : nullptr)
-				{
-					KickFrom(*World, *Session);
-				}
-			}
-
-			// A player whose connection has not reached the game yet is swept again next tick. The sweep
-			// stops only when there is nobody left to look for.
-			if (Refused.IsEmpty())
-			{
-				SweepHandle.Reset();
-
-				return false;
-			}
-
-			return true;
-		}
-
-		TArray<FString> Refused;
-		FTSTicker::FDelegateHandle SweepHandle;
-	};
-
-	/** The Steam services, which exist once per process outside the editor. */
-	static UE::Online::IAuthPtr GetAuth()
-	{
-		const auto Services = UE::Online::GetServices(UE::Online::EOnlineServices::Steam);
-
-		return Services.IsValid() ? Services->GetAuthInterface() : nullptr;
+		return UE::Online::FOnlineIdRegistryRegistry::Get().ToAccountId(UE::Online::EOnlineServices::Steam, ReplicationData);
 	}
 
 	/** The account of whoever is signed in here, which on a client is the player offering a ticket. */
@@ -246,57 +192,70 @@ namespace PoFigGames::Online::Private
 
 namespace PoFigGames::Online
 {
+	const FName FAuthHandlerSteam::ComponentName { TEXT("AuthHandlerSteam") };
+
 	FAuthHandlerSteam::FAuthHandlerSteam()
+		: HandlerComponent(ComponentName)
 	{
 		HandlerComponent::SetActive(true);
 
-		// Nothing travels on this connection until the exchange below has run.
+		// Nothing travels on this connection until the exchange below has run. Which services to ask is
+		// not known yet: that depends on the world the connection belongs to, and the connection is handed
+		// over after the packet handler has built its components.
 		bRequiresHandshake = true;
-
-		bEnabled = Private::GetAuth().IsValid();
-
-		UE_CLOG(!bEnabled, LogOnlineSocketsSteam, Warning,
-			TEXT("[FAuthHandlerSteam] No Steam services here, so nobody is asked to prove who they are."));
 	}
 
 	FAuthHandlerSteam::~FAuthHandlerSteam()
 	{
-		if (!Session.IsValid())
+		if (!Auth.IsValid())
 		{
 			return;
 		}
 
 		// The session Steam opened for this player closes with their connection; left open, the provider
 		// answered the next one with DuplicateRequest when this was checked on 2026-09-13.
-		if (const auto Auth = Private::GetAuth())
+		if (Session.IsValid())
 		{
-			UE::Online::FAuthEndVerifiedAuthSession::Params Params;
-			Params.SessionId = Session;
+			UE::Online::FAuthEndVerifiedAuthSession::Params SessionParams;
+			SessionParams.SessionId = Session;
 
-			Auth->EndVerifiedAuthSession(MoveTemp(Params));
+			Auth->EndVerifiedAuthSession(MoveTemp(SessionParams));
+		}
+
+		// A ticket stays good until it is cancelled, and this one was issued for this connection alone.
+		// Cancelling tells whoever still holds it to drop the session, which by now is what leaving means.
+		if (IssuedTicket.IsValid())
+		{
+			UE::Online::FAuthCancelVerifiedAuthTicket::Params TicketParams;
+			TicketParams.LocalAccountId = Account;
+			TicketParams.VerifiedAuthTicketId = IssuedTicket;
+
+			Auth->CancelVerifiedAuthTicket(MoveTemp(TicketParams));
 		}
 	}
 
 	void FAuthHandlerSteam::Initialize()
 	{
-		if (!bEnabled)
-		{
-			// Still has to say it is done, or every connection waits on a handshake that will not happen.
-			if (Handler)
-			{
-				BecomeReady();
-			}
-			else
-			{
-				SetActive(false);
-			}
-		}
+		// Nothing is decided here. Which services this exchange belongs to depends on the connection, and
+		// the packet handler builds and initialises its components before the connection is handed over, so
+		// both that and the answer for a world with no services are settled in NotifyHandshakeBegin.
 	}
 
 	void FAuthHandlerSteam::NotifyHandshakeBegin()
 	{
+		// Asked for here rather than in the constructor: in the editor the services instance is named after
+		// the play world, and the one this exchange belongs to is the one its connection's driver is in. By
+		// now the connection has been handed over; in the constructor it had not.
+		Auth = Steam::FSocketSubsystemSteam::GetAuthInterface(Connection.IsValid() ? ToRawPtr(Connection->Driver) : nullptr);
+		bEnabled = Auth.IsValid();
+
 		if (!bEnabled)
 		{
+			UE_LOG(LogOnlineSocketsSteam, Warning,
+				TEXT("[FAuthHandlerSteam] No Steam services in this world, so nobody is asked to prove who they are."));
+
+			BecomeReady();
+
 			return;
 		}
 
@@ -330,10 +289,9 @@ namespace PoFigGames::Online
 
 	void FAuthHandlerSteam::AskForTicket()
 	{
-		const auto Auth = Private::GetAuth();
 		const auto Local = Private::GetLocalAccount(Auth);
 
-		if (!Auth.IsValid() || !Local.IsValid())
+		if (!Local.IsValid())
 		{
 			UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] Nobody is signed in here, so this connection offers no proof."));
 
@@ -349,8 +307,15 @@ namespace PoFigGames::Online
 		Params.Audience = UE::Online::ERemoteAuthTicketAudience::DedicatedServer;
 
 		// Issued rather than reused: the provider only vouches for a ticket it has just handed out, and it
-		// answers on a callback of its own rather than at once.
-		Auth->QueryVerifiedAuthTicket(MoveTemp(Params)).OnComplete(
+		// answers on a callback of its own rather than at once. Asked for through the seam where the
+		// services left one, so that the ticket names this host and no other can show it on.
+		const auto& BoundRequest = FOnlineSocketsSteamModule::Get().GetBoundTicketRequest();
+
+		auto TicketHandle = BoundRequest.IsBound()
+			? BoundRequest.Execute(Auth, MoveTemp(Params), Peer)
+			: Auth->QueryVerifiedAuthTicket(MoveTemp(Params));
+
+		TicketHandle.OnComplete(
 			[this, Alive = TWeakPtr<uint8>(Liveness)](const UE::Online::TOnlineResult<UE::Online::FAuthQueryVerifiedAuthTicket>& Result)
 			{
 				if (!Alive.IsValid())
@@ -369,6 +334,7 @@ namespace PoFigGames::Online
 				}
 
 				Ticket = Result.GetOkValue().VerifiedAuthTicket.Data;
+				IssuedTicket = Result.GetOkValue().VerifiedAuthTicketId;
 
 				SendTicket();
 			});
@@ -383,6 +349,24 @@ namespace PoFigGames::Online
 		FBitWriter Packet((sizeof(Private::FAuthTicketMessage) + Private::LongestTicketText) * 8 + 1);
 		Packet.WriteBit(1);
 		Packet << Message;
+
+		// What fits is the connection's packet size less what the components after this one reserve, and a
+		// ticket is the only thing here whose length Steam decides. Over that budget the packet handler
+		// drops the packet with an error of its own, and this end would then offer the same ticket again
+		// every two seconds until the connection timed out.
+		if (Packet.GetNumBits() > MaxOutgoingBits)
+		{
+			UE_LOG(LogOnlineSocketsSteam, Error,
+				TEXT("[FAuthHandlerSteam] The ticket needs %" INT64_FMT " bits and %u fit in a packet; this connection cannot offer proof."),
+				Packet.GetNumBits(), MaxOutgoingBits);
+
+			if (const auto UnprovableConnection = Connection.Get())
+			{
+				UnprovableConnection->Close(ENetCloseResult::PendingConnectionFailure);
+			}
+
+			return;
+		}
 
 		SendPacket(Packet);
 
@@ -401,6 +385,41 @@ namespace PoFigGames::Online
 		Packet << Message;
 
 		SendPacket(Packet);
+	}
+
+	void FAuthHandlerSteam::SetPeer(const Steam::FSteamNetAddress& InPeer)
+	{
+		Peer = InPeer;
+	}
+
+	void FAuthHandlerSteam::SetConnection(UNetConnectionSteam* InConnection)
+	{
+		Connection = InConnection;
+	}
+
+	void FAuthHandlerSteam::Refuse(const TCHAR* Reason)
+	{
+		UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] %s; the connection is refused."), Reason);
+
+		SendVerdict(false);
+
+		// Never Initialized(): a component that reports itself ready hands the connection straight on to
+		// NMT_Hello, which is the thing a refusal has to prevent. Closing does not tear this component down
+		// with it - that waits for the driver's own tick - so returning straight after is enough
+		// (UNetConnection::Close, checked on 2026-09-15).
+		if (const auto RefusedConnection = Connection.Get())
+		{
+			RefusedConnection->Close(ENetCloseResult::PreLoginFailure);
+		}
+	}
+
+	void FAuthHandlerSteam::Refuse(FBitReader& Packet, const TCHAR* Reason)
+	{
+		Refuse(Reason);
+
+		// Inside Incoming the packet is the shorter way out, and it covers a connection this component was
+		// never told about: an error carrying no recovery closes it (UNetConnection::ReceivedRawPacket).
+		Packet.SetError();
 	}
 
 	void FAuthHandlerSteam::RequestResend()
@@ -447,7 +466,9 @@ namespace PoFigGames::Online
 
 	void FAuthHandlerSteam::Tick(float /*DeltaTime*/)
 	{
-		if (!bEnabled || State == EState::Ready || State == EState::Idle || !Handler)
+		// Nothing is resent while the services are being waited on: the ticket is with them, and asking for
+		// it again would only start the wait over.
+		if (!bEnabled || State == EState::Ready || State == EState::Idle || State == EState::WaitingForVerdict || !Handler)
 		{
 			return;
 		}
@@ -492,25 +513,35 @@ namespace PoFigGames::Online
 
 			if (Packet.IsError() || Offered.Ticket.Len() > Private::LongestTicketText)
 			{
-				UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] The offered ticket was not a ticket; the connection is refused."));
+				Refuse(Packet, TEXT("The offered ticket was not a ticket"));
 
-				Packet.SetError();
-				SendVerdict(false);
-				BecomeReady();
+				return;
+			}
+
+			if (!Auth.IsValid())
+			{
+				// The handler only enables itself where there is a provider, so this is one that went away
+				// mid-handshake. Nobody can be checked, and letting them in unchecked is not the answer.
+				Refuse(Packet, TEXT("This server has no online services left to check a ticket with"));
 
 				return;
 			}
 
 			Account = UE::Online::FOnlineIdRegistryRegistry::Get().ToAccountId(UE::Online::EOnlineServices::Steam, Offered.Account);
 
-			const auto Auth = Private::GetAuth();
-
-			if (!Account.IsValid() || !Auth.IsValid())
+			if (!Account.IsValid())
 			{
-				UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] A connection offered no account this server can check."));
+				Refuse(Packet, TEXT("A connection offered an account this server cannot resolve"));
 
-				SendVerdict(false);
-				BecomeReady();
+				return;
+			}
+
+			// The relay signs the identity it routes for, so over it a ticket for anybody else is not this
+			// peer's to offer. A plain address authenticates nothing, and there is nothing to hold it to.
+			if (Peer.GetProtocolType() == Steam::SteamRelayProtocol
+				&& Account != Private::ToAccountId(Peer.GetSteamID().ConvertToUint64()))
+			{
+				Refuse(Packet, TEXT("The offered ticket names an account other than the peer Steam vouched for"));
 
 				return;
 			}
@@ -520,17 +551,26 @@ namespace PoFigGames::Online
 			Params.Ticket.Type = UE::Online::ExternalLoginType::SteamSessionTicket;
 			Params.Ticket.Data = Offered.Ticket;
 
-			// Steam judges the shape of the ticket now and the account behind it on a round trip of its own,
-			// which its documentation warns may take indefinitely and asks callers not to wait on; a session
-			// it later calls invalid must end. Checked on 2026-09-13.
-			const auto bRefusedAtOnce = MakeShared<bool>(false);
-
+			// Nothing is answered until the services have. Steam judges the shape of the ticket at once and
+			// the account behind it on a round trip of its own, and the connection waits for both rather
+			// than being let through and taken back. Checked on 2026-09-13.
 			Auth->BeginVerifiedAuthSession(MoveTemp(Params)).OnComplete(
-				[this, bRefusedAtOnce, Alive = TWeakPtr<uint8>(Liveness)]
+				[this, Alive = TWeakPtr<uint8>(Liveness)]
 				(const UE::Online::TOnlineResult<UE::Online::FAuthBeginVerifiedAuthSession>& Result)
 				{
 					if (!Alive.IsValid())
 					{
+						// The connection went before the answer did, and a session Steam opened for it is
+						// now nobody's to close. Left open, it answers that player's next attempt with
+						// DuplicateRequest for as long as this server lives.
+						if (Result.IsOk() && Auth.IsValid())
+						{
+							UE::Online::FAuthEndVerifiedAuthSession::Params Params;
+							Params.SessionId = Result.GetOkValue().Session.SessionId;
+
+							Auth->EndVerifiedAuthSession(MoveTemp(Params));
+						}
+
 						return;
 					}
 
@@ -538,34 +578,45 @@ namespace PoFigGames::Online
 					{
 						Session = Result.GetOkValue().Session.SessionId;
 
+						UE_LOG(LogOnlineSocketsSteam, Verbose, TEXT("[FAuthHandlerSteam] The services vouched for %s."), *ToLogString(Account));
+
+						SendVerdict(true);
+						BecomeReady();
+
 						return;
 					}
 
-					UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] %s was refused: %s"),
-						*ToLogString(Account), *Result.GetErrorValue().GetLogString());
-
-					if (State == EState::Ready)
-					{
-						Private::FRefusedPlayers::Get().Refuse(ToString(Account));
-					}
-					else
-					{
-						*bRefusedAtOnce = true;
-					}
+					// A timeout is among these. Nothing is known about the player either way by then, and a
+					// player nothing is known about does not get in.
+					Refuse(*FString::Printf(TEXT("%s could not be verified: %s"),
+						*ToLogString(Account), *Result.GetErrorValue().GetLogString()));
 				});
 
-			SendVerdict(!*bRefusedAtOnce);
-			BecomeReady();
+			State = EState::WaitingForVerdict;
 		}
 		else if (State == EState::SentTicket && Header.Type == Private::EAuthMessage::Verdict)
 		{
 			Private::FAuthVerdictMessage Verdict;
 			Packet << Verdict;
 
-			UE_CLOG(!Packet.IsError(), LogOnlineSocketsSteam, Verbose, TEXT("[FAuthHandlerSteam] The server took the ticket: %d"), Verdict.bAccepted);
+			if (Packet.IsError())
+			{
+				return;
+			}
 
-			// Ready either way: a refusal is the server's to act on, and this end has to finish the
-			// handshake for the refusal to reach it.
+			if (!Verdict.bAccepted)
+			{
+				// The server has already closed its end, so there is nothing left to finish the handshake
+				// for; closing here too turns a minute of timing out into an answer.
+				UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[FAuthHandlerSteam] The server would not take the ticket; the connection is refused."));
+
+				Packet.SetError();
+
+				return;
+			}
+
+			UE_LOG(LogOnlineSocketsSteam, Verbose, TEXT("[FAuthHandlerSteam] The server took the ticket."));
+
 			BecomeReady();
 		}
 		else if (State == EState::SentTicket && Header.Type == Private::EAuthMessage::ResendTicket)
@@ -578,10 +629,13 @@ namespace PoFigGames::Online
 			{
 				SendVerdict(true);
 			}
-			else
+			else if (State == EState::WaitingForTicket)
 			{
 				RequestResend();
 			}
+
+			// While the services are being waited on there is nothing to say yet, and saying it would only
+			// fetch the same ticket again.
 		}
 	}
 }

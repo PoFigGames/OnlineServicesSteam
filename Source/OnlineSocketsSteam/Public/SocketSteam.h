@@ -2,8 +2,8 @@
 
 #pragma once
 
-#include "SteamNetAddress.h"
 #include "Sockets.h"
+#include "SteamNetAddress.h"
 
 
 THIRD_PARTY_INCLUDES_START
@@ -132,7 +132,7 @@ namespace PoFigGames::Steam
 		 *
 		 * Success does not mean anything arrived: BytesRead says how much did, and zero
 		 * means there was nothing waiting.
-		 * 
+		 *
 		 *
 		 * @param Data Buffer to fill.
 		 * @param BufferSize How much it holds.
@@ -281,6 +281,6 @@ namespace PoFigGames::Steam
 		virtual bool SetMulticastLoopback(bool bLoopback) override;
 		virtual bool SetMulticastTtl(uint8 TimeToLive) override;
 		virtual bool SetMulticastInterface(const FInternetAddr& InterfaceAddress) override;
-	#pragma endregion
+	#pragma endregion Unsupported
 	};
 }

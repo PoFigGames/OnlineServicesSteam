@@ -29,6 +29,7 @@ the one thing it costs.
 - [Steamworks SDK](#steamworks-sdk)
 - [Configuration](#configuration)
 - [Networking](#networking)
+- [Proving who is joining](#proving-who-is-joining)
 - [Dedicated servers](#dedicated-servers)
 - [Known limitations](#known-limitations)
 - [Contributing](#contributing)
@@ -40,15 +41,22 @@ the one thing it costs.
 
 | | |
 |---|---|
-| Unreal Engine | 5.8 or newer (5.6 and 5.7 build, with the fallback noted below) |
+| Unreal Engine | 5.8 (built and run against 5.8.3) |
 | Steamworks SDK | v1.65, downloaded separately — see [Steamworks SDK](#steamworks-sdk) |
 | Platforms | Win64, Mac, Linux |
 | Engine plugins | `OnlineServices`, `OnlineSubsystemUtils` (both ship with the engine) |
 | Steam account | A Steamworks partner account and an App ID |
 
-On 5.8 and newer the plugin uses `OnlineServicesCommonEngineUtils` to map a world onto its services
-instance. On earlier engines that module does not expose the mapping, and `UOnlineServicesSteamInterface`
-serves the same purpose on its own; nothing has to be configured either way.
+The mapping from a world to its online services instance comes from `OnlineSubsystemUtils`. In an editor
+build a Play In Editor world gets an instance named after its world context; every other world, and every
+world outside the editor, gets the unnamed one. The transport asks through this mapping so that it reaches
+the same instance the game signed in to, and never creates one of its own.
+
+No other engine version has been built, so treat anything below 5.8 as untried. What the plugin needs from
+that module is older than its own history: `GetServices(const UWorld*, EOnlineServices)` is there in the
+`5.4.0-release` tag, and `GetServicesInstanceName(const UWorld*)`, which this plugin calls, from
+`5.5.0-release` onward — checked against the engine's release tags on 2026-09-16. There is nothing to
+configure and no version to special-case.
 
 ## Modules
 
@@ -103,10 +111,9 @@ around an API that stays up. So a PIE session ending takes down the lobby and th
 leaves Steam itself running, ready for the next one.
 
 > **The caveat.** Because the API is never shut down while the editor lives, neither is your Steam
-> session: the Steam client goes on showing you as in-game, rich presence stays as the last thing the
-> plugin published, and the `steam_appid.txt` written beside the editor executable stays there. All of
-> it clears when you close the editor. If you need Steam to see you as out of the game, close the
-> editor — restarting PIE will not do it.
+> session: the Steam client goes on showing you as in-game, and rich presence stays as the last thing
+> the plugin published. Both clear when you close the editor. If you need Steam to see you as out of
+> the game, close the editor — restarting PIE will not do it.
 
 Two things that follow from the same design, and are worth knowing before you file a bug:
 
@@ -220,6 +227,9 @@ Protocol=STEAM
 [/Script/OnlineSocketsSteam.NetDriverSteam]
 NetConnectionClassName="/Script/OnlineSocketsSteam.NetConnectionSteam"
 
+[PacketHandlerComponents]
++Components=OnlineSocketsSteam.AuthHandlerSteamFactory
+
 [/Script/Engine.OnlineEngineInterface]
 ClassName=/Script/OnlineServicesSteam.OnlineServicesSteamInterface
 
@@ -228,8 +238,11 @@ ClassName=/Script/OnlineServicesSteam.OnlineServicesSteamInterface
 +CompatibleUniqueNetIdTypes=Steam
 ```
 
-A development build also needs a `steam_appid.txt` next to the executable containing the same App ID,
-because Steam only reports an App ID to a process it launched itself.
+Steam only reports an App ID to a process it launched itself, so a build that was not started through
+the client needs a `steam_appid.txt` beside the executable. The plugin writes that file from `SteamAppId`
+as the API comes up and removes it immediately afterwards, which is the only window Steam reads it in;
+nothing is left behind for a later run to trip over. Shipping and test builds do not write it at all —
+they are started through Steam.
 
 ### `[OnlineServices.Steam]`
 
@@ -242,13 +255,36 @@ section; the header documents each one. The ones worth knowing about:
 | `bUseSteamTransport` | `True` | Whether Steam carries game traffic at all. |
 | `bOverrideDefaultSubsystem` | `True` | Whether Steam becomes the socket subsystem the engine reaches for. |
 | `Transport` | `Sockets` | `Sockets` (`ISteamNetworkingSockets`) or `Messages` (`ISteamNetworkingMessages`). |
+| `bUseRelay` | `True` | Whether a match is spoken over the Steam Datagram Relay or over an address. The same answer for the host and every client. |
 | `bUseSymmetricConnect` | `False` | Peers connect without either being the listener. `Sockets` only. |
-| `bInitServerOnClient` | `False` | Whether a client also brings the game server API up, so it can host a listen server. |
+| `bInitServerOnClient` | `False` | Whether a client also brings the game server API up. A listen server does not need it to host; see [Dedicated servers](#dedicated-servers). |
 | `bRelaunchInSteam` | `False` | Whether a game started outside Steam relaunches through the client. Off while developing. |
 | `bVACEnabled` | `True` | Whether the game server announces itself as VAC secured. |
 | `bAdvertiseServer` | `True` | Whether the game server heartbeats to the master server and appears in the browser. |
 | `GameServerQueryPort` | `27015` | Port the master server queries the game server on. |
+| `RequestTimeoutSeconds` | `4.0` | How long a call into Steam may stay unanswered before it is failed. |
+| `BackendRequestTimeoutSeconds` | `30.0` | The same, for the calls that wait on a Steam backend rather than on the client beside you: verifying a ticket, and a game server's anonymous logon. |
 | `ServerName`, `ProductName`, `GameDirectory`, `GameVersion`, `GameDescription` | — | What the server browser shows and how Steam tells one game's servers from another's. |
+
+### `[/Script/OnlineSocketsSteam.NetDriverSteam]`
+
+`UNetDriverSteam` derives from `UNetDriver`, not from `UIpNetDriver`, so none of the numbers the engine
+writes under the IP driver's own section reach it. The plugin's own `Config/Engine.ini` therefore ships
+the connection timeouts, keep-alive, rates and relevancy values the IP driver uses; without them a
+packaged build would come up with every timeout at zero.
+
+That file is a *dynamic* config layer, applied after a project's static ones, so a project overrides
+these in `Config/PluginOverrideEngine.ini` rather than in its own `DefaultEngine.ini`.
+
+Two keys are off by default and are yours to set:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `MaxSecondsInReceive` | `0.0` | Longest one dispatch may spend reading packets. |
+| `NbPacketsBetweenReceiveTimeTest` | `0` | How many packets it reads between two checks of that. |
+
+Both have to name a number for there to be a budget at all; left at zero — which is how the engine ships
+the same pair on `UIpNetDriver` — the dispatch reads until the sockets are empty.
 
 ### `[OnlineServices.Steam.Auth]`
 
@@ -299,13 +335,36 @@ Either way, traffic goes through the Steam Datagram Relay: peers never learn one
 and NAT traversal is Valve's problem rather than yours. `NetDriverDefinitions` above keeps
 `IpNetDriver` as the fallback, so a build with Steam unavailable still runs on plain sockets.
 
-Travel URLs use the `STEAM` protocol and a SteamID in place of an address: `STEAM.76561198000000000`.
+Travel URLs use the `STEAM` protocol and an identity in place of an address:
+`STEAM:<identity>[:<channel>]`, where the identity is a SteamID over the relay or an IP address without
+it, and the channel stands in for the port and only means anything to the `Messages` transport.
+
+## Proving who is joining
+
+`AuthHandlerSteamFactory` above adds a step to the connection handshake, after the engine's own stateless
+challenge and before the engine has a login to refuse. The joining player asks Steam for a ticket and
+offers it; the server puts it to Steam and waits. Nothing reaches the game until Steam has vouched for the
+account: a refusal, an error, or no answer at all closes the connection where it stands. Over the relay
+the ticket also has to name the identity Steam signed for that connection, and a client that then logs in
+as somebody else is closed too.
+
+The account that was proved is on the connection, so a game that wants to hold its own login against it
+can ask `UNetConnectionSteam::GetVerifiedAccount()`.
+
+Both ends need the component. A world with no Steam services asks nobody to prove anything — it says so
+in the log and lets the connection through — and that only works when neither end has them: a server that
+asks and a client that cannot answer wait for each other until the connection times out. "No services"
+means the game has not brought them up in that world; the handshake never creates them itself.
 
 ## Dedicated servers
 
 A dedicated server brings up the game server API only, and therefore registers every component except
-lobbies — Steam matchmaking belongs to the client API. Set `bInitServerOnClient=True` if a *client* has
-to be able to host a listen server.
+lobbies — Steam matchmaking belongs to the client API.
+
+`bInitServerOnClient=True` brings the game server API up on a client as well. A listen server does not
+need it to host: over the relay it listens on the identity of the player running it. What it buys is
+hosting *before* that player has signed in — the listener is held open across the login — and verifying
+a joining player's ticket through the game server API rather than the client one.
 
 The socket layer announces the server's listen address, and the services layer binds it to the lobby;
 a game does not have to do either by hand.
@@ -326,6 +385,10 @@ a game does not have to do either by hand.
   only shut down as the process exits, which is what makes repeated PIE sessions work at all; the price
   is that Steam goes on showing you as in-game until the editor closes. See
   [Play In Editor](#play-in-editor).
+- **An API that fails to come up is not tried again.** The SDK documents `SteamAPI_Shutdown` as
+  something to call at process exit and offers no supported way back up, so a failure is remembered for
+  the life of the process: a later request for that API is told it is not running rather than being
+  allowed to start a second attempt. Restart the process.
 - **Steam Deck detection is telemetry-shaped.** `IsRunningOnSteamDeck` was removed in SDK 1.65;
   `FSteamDeviceInfo` exposes `IsRunningOnSteamHardware` (telemetry) and `GetSteamHardwareDefaultConfig`
   (what you should actually branch on).

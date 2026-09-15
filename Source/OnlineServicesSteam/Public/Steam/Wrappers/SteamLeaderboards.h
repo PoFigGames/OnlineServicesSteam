@@ -12,7 +12,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamLeaderboardEntry
 	 *
-	 * One row of a leaderboard, as Steam hands it out.
+	 * @brief One row of a leaderboard, as Steam hands it out.
 	 */
 	struct FSteamLeaderboardEntry
 	{
@@ -25,7 +25,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamFindLeaderboard
 	 *
-	 * Resolves the handle Steam knows a leaderboard by, which every other call about it needs.
+	 * @brief Resolves the handle Steam knows a leaderboard by, which every other call about it needs.
 	 *
 	 * A board the configuration describes is created when it is not there yet, because the configuration
 	 * says how it would have to be sorted; a board nothing describes is only looked up.
@@ -84,7 +84,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamDownloadLeaderboardEntries
 	 *
-	 * Downloads rows of a leaderboard, either a range of it or the rows of named users.
+	 * @brief Downloads rows of a leaderboard, either a range of it or the rows of named users.
 	 *
 	 * The rows are read out as the answer is converted: Steam frees them once they have been read, and
 	 * the handle they came on is of no use afterwards.
@@ -160,15 +160,14 @@ namespace PoFigGames::Steam::Wrappers
 			for (int32 EntryIndex = 0; EntryIndex < Message.m_cEntryCount; ++EntryIndex)
 			{
 				LeaderboardEntry_t SteamEntry { };
-				if (!Interface->GetDownloadedLeaderboardEntry(Message.m_hSteamLeaderboardEntries, EntryIndex, &SteamEntry, nullptr, 0))
-				{
-					continue;
-				}
 
-				Downloaded.Entries.Emplace(FSteamLeaderboardEntry {
-					.UserId = SteamEntry.m_steamIDUser,
-					.Rank = SteamEntry.m_nGlobalRank,
-					.Score = SteamEntry.m_nScore });
+				if (Interface->GetDownloadedLeaderboardEntry(Message.m_hSteamLeaderboardEntries, EntryIndex, &SteamEntry, nullptr, 0))
+				{
+					Downloaded.Entries.Emplace(FSteamLeaderboardEntry {
+						.UserId = SteamEntry.m_steamIDUser,
+						.Rank = SteamEntry.m_nGlobalRank,
+						.Score = SteamEntry.m_nScore });
+				}
 			}
 
 			return TSteamResultOf<Result>(MoveTemp(Downloaded));
@@ -178,7 +177,7 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamUploadLeaderboardScore
 	 *
-	 * Writes the score of the local user onto a leaderboard.
+	 * @brief Writes the score of the local user onto a leaderboard.
 	 */
 	struct FSteamUploadLeaderboardScore
 	{

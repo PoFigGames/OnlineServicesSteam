@@ -4,6 +4,7 @@
 
 // Project
 #include "OnlineServicesSteamLogChannels.h"
+#include "OnlineSocketsSteamModule.h"
 #include "SteamNetAddress.h"
 #include "SteamPlatformConfig.h"
 #include "Online/AchievementsSteam.h"
@@ -21,7 +22,8 @@
 #include "Steam/SteamServerService.h"
 
 
-namespace PoFigGames::Online {
+namespace PoFigGames::Online
+{
 	FOnlineServicesSteam::FOnlineServicesSteam(FName InInstanceName, FName InstanceConfigName)
 		: FOnlineServicesCommon(GetServiceConfigNameStatic(), InInstanceName, InstanceConfigName)
 	{
@@ -64,13 +66,13 @@ namespace PoFigGames::Online {
 		}
 
 		// Steam sockets are optional: with them disabled the game keeps the engine's own socket subsystem.
+		// When they are wanted, the transport module is asked for the one subsystem of this process rather
+		// than made another: it registers under a name the engine keeps a single entry for.
 		if (SteamConfig.bUseSteamTransport)
 		{
-			SocketSubsystem = MakeUnique<Steam::FSocketSubsystemSteam>();
-			if (FString Error; !SocketSubsystem->Init(Error))
+			if (FString Error; !FOnlineSocketsSteamModule::Get().EnsureSocketSubsystem(Error))
 			{
 				UE_LOG(LogOnlineServicesSteam, Error, TEXT("Failed to initialize Steamworks Socket Subsystem: %s"), *Error);
-				SocketSubsystem.Reset();
 				ReleaseSteamServices();
 
 				return false;
@@ -80,6 +82,11 @@ namespace PoFigGames::Online {
 		{
 			UE_LOG(LogOnlineServicesSteam, Log, TEXT("Steam sockets are disabled by config, the Steam socket subsystem is not registered"));
 		}
+
+		// Left for the handshake, which knows who the other end is and cannot ask for a ticket itself: the
+		// transport module does not know this module and must not. Stateless, so one binding serves every
+		// instance - the auth interface to ask is handed in by the caller.
+		FOnlineSocketsSteamModule::Get().SetBoundTicketRequest(FSteamBoundTicketRequest::CreateStatic(&FAuthSteam::RequestBoundAuthTicket));
 
 		AccountIdRegistry = static_cast<FOnlineAccountIdRegistrySteam*>(UE::Online::FOnlineIdRegistryRegistry::Get().GetAccountIdRegistry(GetServicesProvider()));
 
@@ -110,12 +117,8 @@ namespace PoFigGames::Online {
 
 		CallDispatcher.Reset();
 
-		if (SocketSubsystem)
-		{
-			SocketSubsystem->Shutdown();
-			SocketSubsystem.Reset();
-		}
-
+		// The socket subsystem is not taken down here: it belongs to the transport module and outlives any
+		// one services instance, the way the Steamworks API itself does.
 		ReleaseSteamServices();
 
 		AccountIdRegistry = nullptr;
@@ -252,9 +255,11 @@ namespace PoFigGames::Online {
 	}
 }
 
-namespace UE::Online::Meta {
+namespace UE::Online::Meta
+{
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Steam::FSteamCallConfig)
-		ONLINE_STRUCT_FIELD(PoFigGames::Steam::FSteamCallConfig, RequestTimeoutSeconds)
+		ONLINE_STRUCT_FIELD(PoFigGames::Steam::FSteamCallConfig, RequestTimeoutSeconds),
+		ONLINE_STRUCT_FIELD(PoFigGames::Steam::FSteamCallConfig, BackendRequestTimeoutSeconds)
 	END_ONLINE_STRUCT_META()
 
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Steam::FSteamPlatformConfig)

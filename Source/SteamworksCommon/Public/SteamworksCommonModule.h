@@ -17,20 +17,22 @@
 #endif
 
 /**
- * FSteamworksCommonModule
+ * @class FSteamworksCommonModule
+ *
+ * @brief Loads and unloads the Steamworks libraries this process links against.
  */
 class FSteamworksCommonModule : public IModuleInterface
 {
 public:
 	FSteamworksCommonModule() = default;
 	virtual ~FSteamworksCommonModule() override = default;
-	
+
 	virtual void StartupModule() override;
     virtual void ShutdownModule() override;
 
 	/**
 	 * The Steamworks libraries are linked once for the life of the process, so this module cannot be reloaded.
-	 */ 
+	 */
 	STEAMWORKSCOMMON_API virtual bool SupportsDynamicReloading() override { return false; }
 
 	/**
@@ -75,7 +77,7 @@ public:
 	{
 		return FModuleManager::Get().IsModuleLoaded(TEXT("SteamworksCommon"));
 	}
-	
+
 private:
 	/** Handle to the STEAM API dll */
 	void* ClientLibrary { nullptr };

@@ -85,7 +85,7 @@ ISteamNetworkingSockets* UNetDriverSteam::GetNetworkingSockets()
 
 void UNetDriverSteam::ResetSocketInfo(const TSharedPtr<PoFigGames::Steam::FSocketSteam>& RemovedSocket)
 {
-	UNetConnectionSteam* SocketConnection =
+	const auto SocketConnection =
 		static_cast<UNetConnectionSteam*>(ServerConnection ? ToRawPtr(ServerConnection) : FindClientConnectionForHandle(RemovedSocket->SteamHandle));
 
 	if (SocketConnection)
@@ -97,6 +97,36 @@ void UNetDriverSteam::ResetSocketInfo(const TSharedPtr<PoFigGames::Steam::FSocke
 	{
 		Socket = nullptr;
 	}
+}
+
+void UNetDriverSteam::BeginReceiveBudget()
+{
+	// Both settings have to name a budget for there to be one, so that neither of them alone changes how
+	// much the dispatch reads.
+	ReceiveBailOutTime = MaxSecondsInReceive > 0.0 && NbPacketsBetweenReceiveTimeTest > 0
+		? FPlatformTime::Seconds() + MaxSecondsInReceive
+		: 0.0;
+
+	PacketsUntilReceiveTimeTest = NbPacketsBetweenReceiveTimeTest;
+}
+
+bool UNetDriverSteam::IsReceiveBudgetSpent()
+{
+	if (ReceiveBailOutTime <= 0.0 || --PacketsUntilReceiveTimeTest > 0)
+	{
+		return false;
+	}
+
+	PacketsUntilReceiveTimeTest = NbPacketsBetweenReceiveTimeTest;
+
+	if (FPlatformTime::Seconds() <= ReceiveBailOutTime)
+	{
+		return false;
+	}
+
+	UE_LOG(LogOnlineSocketsSteam, Verbose, TEXT("Stopped reading packets after %f seconds; the rest waits for the next tick"), MaxSecondsInReceive);
+
+	return true;
 }
 
 UNetConnection* UNetDriverSteam::FindClientConnectionForHandle(uint32 SocketHandle)
@@ -278,8 +308,12 @@ bool UNetDriverSteam::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 	}
 
 	FName SocketAddressType = NAME_None;
-	const bool bIsLAN = URL.HasOption(TEXT("bIsLanMatch"));
-	bPassthrough = bIsLAN || URL.HasOption(TEXT("bPassthrough"));
+
+	// One option asks for LAN, and it means two things: the traffic goes to an address rather than through
+	// the relay, and a peer that cannot prove who it is - nobody has a Steam identity on a closed network -
+	// is accepted all the same. It used to also answer to bIsLanMatch, a flag of the older session layer,
+	// which set the second of those and the plugin's own option did not.
+	bPassthrough = URL.HasOption(TEXT("bPassthrough"));
 
 	const auto SteamSubsystem = static_cast<PoFigGames::Steam::FSocketSubsystemSteam*>(GetSocketSubsystem());
 	if (!SteamSubsystem)
@@ -310,10 +344,8 @@ bool UNetDriverSteam::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 	}
 
 	// Whether this process may host on a Steam address at all is a question for the online services.
-	const UE::Online::IAuthPtr Auth = PoFigGames::Steam::FSocketSubsystemSteam::GetAuthInterface();
+	const auto Auth = PoFigGames::Steam::FSocketSubsystemSteam::GetAuthInterface(this);
 	const bool bIsLoggedIn = Auth.IsValid() && Auth->IsLoggedIn(PlatformUserId);
-
-	bIsDelayedNetworkAccess = !bInitAsClient && bIsUsingSteamAddrs && !bIsLoggedIn && !bPassthrough;
 
 	// What a socket speaks is decided by configuration alone, and by the same answer on both sides of a
 	// match. Neither role works it out from what it happens to be holding: the host used to read how far
@@ -342,6 +374,11 @@ bool UNetDriverSteam::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 		}
 	}
 
+	// Only a listener that has to come up on a Steam identity waits for anything. An address is an address
+	// whether or not this process has signed in, so an IP listener is held up by nothing.
+	bIsDelayedNetworkAccess = !bInitAsClient && bIsUsingSteamAddrs && !bIsLoggedIn
+		&& SocketAddressType == PoFigGames::Steam::SteamRelayProtocol;
+
 	// The subsystem is the one holding the socket alive; the driver takes a reference to the very same
 	// object rather than wrapping the raw pointer in an owner of its own.
 	const auto NewSocket = static_cast<PoFigGames::Steam::FSocketSteam*>(
@@ -359,7 +396,7 @@ bool UNetDriverSteam::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 
 	// A LAN peer cannot prove who it is, so the socket has to be told to accept it before the handshake
 	// rather than after.
-	if (bIsLAN)
+	if (bPassthrough)
 	{
 		Socket->bIsLANSocket = true;
 	}
@@ -402,7 +439,9 @@ bool UNetDriverSteam::InitBase(bool bInitAsClient, FNetworkNotify* InNotify, con
 		LocalAddr = SteamSubsystem->CreateInternetAddr(SocketAddressType);
 	}
 
-	if (bPassthrough)
+	// The relay routes by identity and channel, so a port is only a port where the socket speaks to an
+	// address. LAN is one such case; so is a match configured to go without the relay at all.
+	if (SocketAddressType == PoFigGames::Steam::SteamIpProtocol)
 	{
 		LocalAddr->SetPort(URL.Port);
 	}
@@ -520,22 +559,14 @@ bool UNetDriverSteam::InitListen(FNetworkNotify* InNotify, FURL& ListenURL, bool
 	return true;
 }
 
-UNetConnection* UNetDriverSteam::FindClientConnectionForIdentity(const uint64 SteamId)
+UNetConnection* UNetDriverSteam::FindClientConnectionForPeer(const TSharedRef<const FInternetAddr>& PeerAddress)
 {
-	for (auto& ClientConnection : ClientConnections)
-	{
-		if (const auto SteamConnection = static_cast<UNetConnectionSteam*>(ToRawPtr(ClientConnection)))
-		{
-			PoFigGames::Steam::FSteamNetAddress PeerAddress;
-			if (SteamConnection->GetRawSocket().IsValid() && SteamConnection->GetRawSocket()->GetPeerAddress(PeerAddress)
-				&& PeerAddress.GetSteamID().ConvertToUint64() == SteamId)
-			{
-				return ClientConnection;
-			}
-		}
-	}
+	// UNetDriver keeps this map for exactly this lookup and fills it in AddClientConnection and
+	// RemoveClientConnection, so the driver does not track its connections a second time. A peer which has
+	// just gone stays in it as an empty entry for RecentlyDisconnectedTrackingTime.
+	const auto MappedConnection = MappedClientConnections.Find(PeerAddress);
 
-	return nullptr;
+	return MappedConnection != nullptr ? ToRawPtr(*MappedConnection) : nullptr;
 }
 
 void UNetDriverSteam::CreateMessagesConnection(const TSharedRef<PoFigGames::Steam::FSocketSteam>& AcceptedSocket)
@@ -604,29 +635,36 @@ void UNetDriverSteam::ReceiveMessagesOnSocket(const TSharedPtr<PoFigGames::Steam
 	int32 ReadCount = 0;
 	SteamNetworkingMessage_t* Message { nullptr };
 
+	// Built once and refilled for every message: the lookup below takes the address by shared reference.
+	const auto MessageSender = MakeShared<PoFigGames::Steam::FSteamNetAddress>();
+
 	while (FromSocket->RecvRaw(Message, 1, ReadCount) && ReadCount > 0 && Message != nullptr)
 	{
-		PoFigGames::Steam::FSteamNetAddress MessageSender(Message->m_identityPeer);
-		MessageSender.SetPort(Message->m_nChannel);
+		*MessageSender = PoFigGames::Steam::FSteamNetAddress(Message->m_identityPeer);
 
 		// A message read off the socket which owns the channel belongs to a peer nobody speaks to yet.
-		UNetConnection* Destination = ForConnection != nullptr
-			? ForConnection
-			: FindClientConnectionForIdentity(Message->m_identityPeer.GetSteamID64());
+		const auto Destination = ForConnection != nullptr ? ForConnection : FindClientConnectionForPeer(MessageSender);
+
+		MessageSender->SetPort(Message->m_nChannel);
 
 		if (Destination != nullptr)
 		{
-			UE_LOG(LogOnlineSocketsSteam, VeryVerbose, TEXT("Received message from %s with size %d"), *MessageSender.ToString(true), Message->GetSize());
-			static_cast<UNetConnectionSteam*>(Destination)->HandleRecvMessage(Message->m_pData, Message->GetSize(), &MessageSender);
+			UE_LOG(LogOnlineSocketsSteam, VeryVerbose, TEXT("Received message from %s with size %d"), *MessageSender->ToString(true), Message->GetSize());
+			static_cast<UNetConnectionSteam*>(Destination)->HandleRecvMessage(Message->m_pData, Message->GetSize(), &MessageSender.Get());
 		}
 		else
 		{
-			UE_LOG(LogOnlineSocketsSteam, Verbose, TEXT("Dropped a message from %s: no connection speaks to it yet"), *MessageSender.ToString(true));
+			UE_LOG(LogOnlineSocketsSteam, Verbose, TEXT("Dropped a message from %s: no connection speaks to it yet"), *MessageSender->ToString(true));
 		}
 
 		Message->Release();
 		Message = nullptr;
 		ReadCount = 0;
+
+		if (IsReceiveBudgetSpent())
+		{
+			return;
+		}
 	}
 }
 
@@ -680,6 +718,8 @@ void UNetDriverSteam::TickDispatch(float DeltaTime)
 		SteamSubsystem->SweepClosedSockets();
 	}
 
+	BeginReceiveBudget();
+
 	// The connectionless transport names no connection on a message and announces no connection either,
 	// so it is dispatched by identity rather than by handle.
 	if (PoFigGames::Steam::FSocketSubsystemSteam::GetTransport() == PoFigGames::Steam::ESteamTransport::Messages)
@@ -696,6 +736,9 @@ void UNetDriverSteam::TickDispatch(float DeltaTime)
 	{
 		return;
 	}
+
+	// Built once and refilled for every packet: the lookup below takes the address by shared reference.
+	const auto MessageSender = MakeShared<PoFigGames::Steam::FSteamNetAddress>();
 
 	// The socket is tested every pass, because an API event handled between two reads can take it away.
 	while (Socket != nullptr)
@@ -719,32 +762,37 @@ void UNetDriverSteam::TickDispatch(float DeltaTime)
 			break;
 		}
 
+		*MessageSender = PoFigGames::Steam::FSteamNetAddress(Message->m_identityPeer);
+
 		const auto ConnectionToHandleMessage = static_cast<UNetConnectionSteam*>(bIsAServer
-			? FindClientConnectionForHandle(Message->m_conn)
+			? FindClientConnectionForPeer(MessageSender)
 			: ToRawPtr(ServerConnection));
 
-		PoFigGames::Steam::FSteamNetAddress MessageSender(Message->m_identityPeer);
-
 		// A peer named by identity carries no port, so the channel is filled in from the socket.
-		if (MessageSender.GetProtocolType() != PoFigGames::Steam::SteamIpProtocol)
+		if (MessageSender->GetProtocolType() != PoFigGames::Steam::SteamIpProtocol)
 		{
-			MessageSender.SetPort(Message->m_nChannel);
+			MessageSender->SetPort(Message->m_nChannel);
 		}
 
 		if (ConnectionToHandleMessage != nullptr)
 		{
 			UE_LOG(LogOnlineSocketsSteam, VeryVerbose, TEXT("Received packet from %s with size %d"),
-				*MessageSender.ToString(true), Message->GetSize());
+				*MessageSender->ToString(true), Message->GetSize());
 
-			ConnectionToHandleMessage->HandleRecvMessage(Message->m_pData, Message->GetSize(), &MessageSender);
+			ConnectionToHandleMessage->HandleRecvMessage(Message->m_pData, Message->GetSize(), &MessageSender.Get());
 		}
 		else
 		{
 			UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("Could not find connection information for sender %s (handle: %u)"),
-				*MessageSender.ToString(true), Message->m_conn);
+				*MessageSender->ToString(true), Message->m_conn);
 		}
 
 		Message->Release();
+
+		if (IsReceiveBudgetSpent())
+		{
+			break;
+		}
 	}
 }
 

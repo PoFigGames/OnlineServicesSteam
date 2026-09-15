@@ -5,7 +5,8 @@
 #include "Online/OnlineComponentSteam.h"
 #include "Online/PrivilegesCommon.h"
 
-namespace PoFigGames::Online {
+namespace PoFigGames::Online
+{
 	/**
 	 * @class FPrivilegesSteam
 	 *

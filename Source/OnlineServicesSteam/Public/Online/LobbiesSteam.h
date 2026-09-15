@@ -2,11 +2,11 @@
 
 #pragma once
 
-#include "SteamNetAddress.h"
 #include "Online/LobbiesCommon.h"
 #include "Online/OnlineComponentSteam.h"
 #include "Steam/Wrappers/SteamLobby.h"
 #include "SteamLobbyKeys.h"
+#include "SteamNetAddress.h"
 #include "SteamUtils.h"
 
 THIRD_PARTY_INCLUDES_START
@@ -28,12 +28,17 @@ namespace PoFigGames::Online
 	// Declared inline rather than as static references: a reference at namespace scope binds to a
 	// materialised temporary, giving every translation unit its own object, its own static initialiser and
 	// its own heap allocation for the same four strings.
-	inline const FString LOBBY_STEAM_ID_KEY_NAME { TEXT("LobbySteamId") };
-	inline const FString LOBBY_DETAILS_KEY_NAME { TEXT("LobbyDetails") };
-	inline const FString LOBBY_DATA_KEY_NAME { TEXT("LobbyData") };
-	inline const FString LOBBY_SEARCH_KEY_NAME { TEXT("LobbySearch") };
+	inline const FString LobbySteamIdKey { TEXT("LobbySteamId") };
+	inline const FString LobbyDetailsKey { TEXT("LobbyDetails") };
+	inline const FString LobbyDataKey { TEXT("LobbyData") };
+	inline const FString LobbySearchKey { TEXT("LobbySearch") };
 
 
+	/**
+	 * @struct FLobbiesDestroyLobbyImpl
+	 *
+	 * @brief The internal half of destroying a lobby, which the public operation is written in terms of.
+	 */
 	struct FLobbiesDestroyLobbyImpl
 	{
 		static constexpr TCHAR Name[] = TEXT("DestroyLobbyImpl");
@@ -52,6 +57,11 @@ namespace PoFigGames::Online
 		};
 	};
 
+	/**
+	 * @struct FLobbiesInviteLobbyMemberImpl
+	 *
+	 * @brief The internal half of inviting somebody, which the public operation is written in terms of.
+	 */
 	struct FLobbiesInviteLobbyMemberImpl
 	{
 		static constexpr TCHAR Name[] = TEXT("InviteLobbyMemberImpl");
@@ -73,6 +83,11 @@ namespace PoFigGames::Online
 		};
 	};
 
+	/**
+	 * @struct FLobbiesKickLobbyMemberImpl
+	 *
+	 * @brief The internal half of removing a member, which the public operation is written in terms of.
+	 */
 	struct FLobbiesKickLobbyMemberImpl
 	{
 		static constexpr TCHAR Name[] = TEXT("KickLobbyMemberImpl");
@@ -94,6 +109,11 @@ namespace PoFigGames::Online
 		};
 	};
 
+	/**
+	 * @struct FLobbiesPromoteLobbyMemberImpl
+	 *
+	 * @brief The internal half of handing a lobby over, which the public operation is written in terms of.
+	 */
 	struct FLobbiesPromoteLobbyMemberImpl
 	{
 		static constexpr TCHAR Name[] = TEXT("PromoteLobbyMemberImpl");
@@ -168,6 +188,8 @@ namespace PoFigGames::Online
 
 	/**
 	 * @struct FLobbiesProcessLobbyNotificationImpl
+	 *
+	 * @brief One lobby notification from Steam, carried through the operation queue like any other request.
 	 */
 	struct FLobbiesProcessLobbyNotificationImpl
 	{
@@ -185,7 +207,6 @@ namespace PoFigGames::Online
 			TMap<CSteamID, UE::Online::ELobbyMemberLeaveReason> LeavingMembers { };
 		};
 
-		// Todo: += operator.
 		// Merged by lobby, so two requests for one lobby become one.
 
 		struct Result
@@ -311,7 +332,8 @@ namespace PoFigGames::Online
 	};
 }
 
-namespace UE::Online::Meta {
+namespace UE::Online::Meta
+{
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Online::FLobbiesLeaveLobbyImpl::Params)
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FLobbiesLeaveLobbyImpl::Params, LobbyData),
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FLobbiesLeaveLobbyImpl::Params, LocalAccountId)

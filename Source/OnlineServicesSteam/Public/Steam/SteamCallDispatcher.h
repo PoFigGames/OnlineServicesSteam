@@ -19,7 +19,7 @@ namespace PoFigGames::Steam
 	/**
 	 * @enum ESteamCallContext
 	 *
-	 * Which Steam pipe broadcast callbacks have to be registered on.
+	 * @brief Which Steam pipe broadcast callbacks have to be registered on.
 	 */
 	enum class ESteamCallContext : uint8
 	{
@@ -30,20 +30,29 @@ namespace PoFigGames::Steam
 	/**
 	 * @struct FSteamCallConfig
 	 *
-	 * Loaded from the [OnlineServices] and [OnlineServices.Steam] config sections.
+	 * @brief Loaded from the [OnlineServices] and [OnlineServices.Steam] config sections.
 	 */
 	struct FSteamCallConfig
 	{
 		/** How long a request may stay in flight before it is failed with Errors::Timeout(). */
 		double RequestTimeoutSeconds { 4.0 };
+
+		/**
+		 * The same, for a request waiting on a Steam backend rather than on the client beside us.
+		 *
+		 * Valve gives no bound for these at all; this one exists so that a request cannot be pending for
+		 * the life of the process, not because an answer is owed by then.
+		 */
+		double BackendRequestTimeoutSeconds { 30.0 };
 	};
 
 	/**
 	 * @class FSteamPendingRequest
 	 *
-	 * Base for a Steam request which is waiting for its answer. The dispatcher owns every pending request so
-	 * that it can be timed out or cancelled, and the request guarantees that its promise is fulfilled exactly
-	 * once no matter which of those paths completes it.
+	 * @brief Base for a Steam request which is waiting for its answer.
+	 *
+	 * The dispatcher owns every pending request so that it can be timed out or cancelled, and the request
+	 * guarantees that its promise is fulfilled exactly once no matter which of those paths completes it.
 	 */
 	class FSteamPendingRequest : public TSharedFromThis<FSteamPendingRequest>
 	{
@@ -58,8 +67,11 @@ namespace PoFigGames::Steam
 
 		const TCHAR* GetOpName() const { return OpName; }
 
+		/** How long this request was given, which differs between a local call and a backend round trip. */
+		double GetTimeoutSeconds() const { return TimeoutSeconds; }
+
 	protected:
-		ONLINESERVICESSTEAM_API FSteamPendingRequest(FSteamCallDispatcher& InDispatcher, const TCHAR* InOpName, double InDeadlineSeconds);
+		ONLINESERVICESSTEAM_API FSteamPendingRequest(FSteamCallDispatcher& InDispatcher, const TCHAR* InOpName, double InTimeoutSeconds);
 
 		/** Hands the request back to the dispatcher. Safe to call from inside a Steam callback. */
 		ONLINESERVICESSTEAM_API void Release();
@@ -67,6 +79,7 @@ namespace PoFigGames::Steam
 		FSteamCallDispatcher* Dispatcher { nullptr };
 		const TCHAR* OpName { nullptr };
 
+		double TimeoutSeconds { 0.0 };
 		double DeadlineSeconds { 0.0 };
 		bool   bFulfilled { false };
 	};
@@ -74,10 +87,11 @@ namespace PoFigGames::Steam
 	/**
 	 * @class FSteamCallDispatcher
 	 *
-	 * Owns every in-flight Steam request of one online services instance. Guarantees that the future returned
-	 * by a call is fulfilled exactly once: on the Steam callback, on timeout, or on cancellation when the
-	 * service shuts down. Steam callbacks are dispatched from the game thread, so the dispatcher is game
-	 * thread only by design.
+	 * @brief Owns every in-flight Steam request of one online services instance.
+	 *
+	 * Guarantees that the future returned by a call is fulfilled exactly once: on the Steam callback, on
+	 * timeout, or on cancellation when the service shuts down. Steam callbacks are dispatched from the game
+	 * thread, so the dispatcher is game thread only by design.
 	 */
 	class FSteamCallDispatcher final
 	{
@@ -86,7 +100,7 @@ namespace PoFigGames::Steam
 		ONLINESERVICESSTEAM_API ~FSteamCallDispatcher();
 
 		FSteamCallDispatcher(const FSteamCallDispatcher&) = delete;
-		auto& operator = (const FSteamCallDispatcher&) = delete;
+		FSteamCallDispatcher& operator=(const FSteamCallDispatcher&) = delete;
 
 		/** Issues a Steam API call which answers through CCallResult. */
 		template<typename OpType> requires CSteamCallResultOp<OpType>
@@ -125,7 +139,30 @@ namespace PoFigGames::Steam
 		ONLINESERVICESSTEAM_API void AddPendingRequest(const TSharedRef<FSteamPendingRequest>& Request);
 		ONLINESERVICESSTEAM_API void RemovePendingRequest(const FSteamPendingRequest& Request);
 
-		double MakeDeadline() const { return FPlatformTime::Seconds() + Config.RequestTimeoutSeconds; }
+		/**
+		 * Which of Steam's two callback pipes an operation's answer will arrive on.
+		 *
+		 * The operation decides where it says so, because only it knows which API it called; everything
+		 * else is answered on the pipe this instance was built for.
+		 */
+		template<typename OpType>
+		bool UsesGameServerPipe() const
+		{
+			if constexpr (CSteamPipedOp<OpType>)
+			{
+				return OpType::UsesGameServerPipe();
+			}
+			else
+			{
+				return Context == ESteamCallContext::GameServer;
+			}
+		}
+
+		template<typename OpType>
+		double MakeTimeout() const
+		{
+			return CSteamBackendOp<OpType> ? Config.BackendRequestTimeoutSeconds : Config.RequestTimeoutSeconds;
+		}
 
 		ESteamCallContext Context { ESteamCallContext::Client };
 		FSteamCallConfig  Config { };
@@ -138,14 +175,14 @@ namespace PoFigGames::Steam
 		/**
 		 * @class TSteamCallResultRequest
 		 *
-		 * Pending request for a Steam API which answers through CCallResult.
+		 * @brief Pending request for a Steam API which answers through CCallResult.
 		 */
 		template<typename OpType> requires CSteamCallResultOp<OpType>
 		class TSteamCallResultRequest final : public FSteamPendingRequest
 		{
 		public:
-			TSteamCallResultRequest(FSteamCallDispatcher& InDispatcher, OpType::Params&& InParams, const double InDeadlineSeconds)
-				: FSteamPendingRequest(InDispatcher, OpType::Name, InDeadlineSeconds)
+			TSteamCallResultRequest(FSteamCallDispatcher& InDispatcher, OpType::Params&& InParams, const double InTimeoutSeconds)
+				: FSteamPendingRequest(InDispatcher, OpType::Name, InTimeoutSeconds)
 				, Params(MoveTemp(InParams))
 			{
 			}
@@ -226,14 +263,14 @@ namespace PoFigGames::Steam
 		/**
 		 * @class TSteamCallbackRequest
 		 *
-		 * Pending request for a Steam API whose answer arrives on a broadcast callback.
+		 * @brief Pending request for a Steam API whose answer arrives on a broadcast callback.
 		 */
 		template<typename OpType, bool bGameServer> requires CSteamCallbackOp<OpType>
 		class TSteamCallbackRequest final : public FSteamPendingRequest
 		{
 		public:
-			TSteamCallbackRequest(FSteamCallDispatcher& InDispatcher, OpType::Params&& InParams, const double InDeadlineSeconds)
-				: FSteamPendingRequest(InDispatcher, OpType::Name, InDeadlineSeconds)
+			TSteamCallbackRequest(FSteamCallDispatcher& InDispatcher, OpType::Params&& InParams, const double InTimeoutSeconds)
+				: FSteamPendingRequest(InDispatcher, OpType::Name, InTimeoutSeconds)
 				, Params(MoveTemp(InParams))
 				, Callback(this, &TSteamCallbackRequest::OnSteamCallback)
 			{
@@ -309,7 +346,7 @@ namespace PoFigGames::Steam
 		check(IsInGameThread());
 
 		const TSharedRef<Private::TSteamCallResultRequest<OpType>> Request =
-			MakeShared<Private::TSteamCallResultRequest<OpType>>(*this, MoveTemp(Params), MakeDeadline());
+			MakeShared<Private::TSteamCallResultRequest<OpType>>(*this, MoveTemp(Params), MakeTimeout<OpType>());
 
 		auto Future = Request->GetFuture();
 
@@ -322,7 +359,7 @@ namespace PoFigGames::Steam
 	template<typename OpType> requires CSteamCallbackOp<OpType>
 	TFuture<TSteamResult<OpType>> FSteamCallDispatcher::Listen(typename OpType::Params&& Params)
 	{
-		return Context == ESteamCallContext::GameServer
+		return UsesGameServerPipe<OpType>()
 			? StartCallbackRequest<OpType, true>(MoveTemp(Params))
 			: StartCallbackRequest<OpType, false>(MoveTemp(Params));
 	}
@@ -333,7 +370,7 @@ namespace PoFigGames::Steam
 		check(IsInGameThread());
 
 		const TSharedRef<Private::TSteamCallbackRequest<OpType, bGameServer>> Request =
-			MakeShared<Private::TSteamCallbackRequest<OpType, bGameServer>>(*this, MoveTemp(Params), MakeDeadline());
+			MakeShared<Private::TSteamCallbackRequest<OpType, bGameServer>>(*this, MoveTemp(Params), MakeTimeout<OpType>());
 
 		auto Future = Request->GetFuture();
 

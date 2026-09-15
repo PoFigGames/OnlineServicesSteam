@@ -10,7 +10,7 @@ namespace PoFigGames::Online::Errors
 {
 	UE_ONLINE_ERROR_CATEGORY(STEAM, ThirdPartyPlugin, 0x6, "STEAM")
 
-	typedef TFunction<UE::Online::FOnlineError(UE::Online::FOnlineError&& Error, EResult Result)> FErrorMapperSteamFn;
+	using FErrorMapperSteamFn = TFunction<UE::Online::FOnlineError(UE::Online::FOnlineError&& Error, EResult Result)>;
 
 	ONLINESERVICESSTEAM_API UE::Online::FOnlineError MapCommonSteamError(UE::Online::FOnlineError&& Error, EResult Result);
 	ONLINESERVICESSTEAM_API UE::Online::Errors::ErrorCodeType ErrorCodeFromSteamResult(EResult Result);

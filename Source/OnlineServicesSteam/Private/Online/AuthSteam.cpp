@@ -20,7 +20,8 @@
 #include "Online/OnlineUtilsCommon.h"
 
 
-namespace UE::Online::Meta {
+namespace UE::Online::Meta
+{
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Online::FAuthRefreshAccountAttributesImpl::Params)
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FAuthRefreshAccountAttributesImpl::Params, LocalAccountId),
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FAuthRefreshAccountAttributesImpl::Params, bRefreshDisplayName),
@@ -39,7 +40,7 @@ namespace UE::Online::Meta {
 namespace PoFigGames::Online
 {
 	/** Key the pending display name is carried on inside the refresh operation. */
-	static const FString& DISPLAY_NAME_KEY_NAME { TEXT("DisplayNameSteam") };
+	static const FString DisplayNameKey { TEXT("DisplayNameSteam") };
 
 	/**
 	 * Whether a ticket handed in by a remote peer can be turned into bytes at all.
@@ -200,9 +201,64 @@ namespace PoFigGames::Online
 		return GetOnlineServicesSteam().GetClientService() == nullptr;
 	}
 
+	/** The one bucket every game server login shares, so that two spellings of that identity meet in Compare. */
+	static uint32 HashGameServerLogin()
+	{
+		return GetTypeHash(LoginCredentialsType::AnonymousGameServer);
+	}
+
+	/** Hashes the part of a login that FLoginJoinFuncs compares; the token is left out, as it is there. */
+	static uint32 HashLoginParams(const UE::Online::FAuthLogin::Params& Params)
+	{
+		return HashCombine(GetTypeHash(Params.PlatformUserId),
+			HashCombine(GetTypeHash(Params.CredentialsType), GetTypeHash(Params.CredentialsId)));
+	}
+
+	/**
+	 * @struct FLoginJoinFuncs
+	 *
+	 * @brief What makes two logins one login, so that the second caller waits on the first.
+	 *
+	 * The game server is one identity per process, and the plugin does not log it on at all: it waits for
+	 * the anonymous logon the API performs when it comes up. Two callers naming it are therefore waiting
+	 * for the same confirmation, whatever credentials either of them offered, and the transport asks for
+	 * the same identity a game does. Everything else has to name the same user and ask for the same
+	 * credentials; the token is not compared, because a TVariant has no equality to compare it with.
+	 */
+	struct FLoginJoinFuncs
+	{
+		static bool NamesGameServer(const UE::Online::FAuthLogin::Params& Params)
+		{
+			return Params.CredentialsType == LoginCredentialsType::AnonymousGameServer
+				|| Params.PlatformUserId == Steam::SteamGameServerPlatformId;
+		}
+
+		static bool Compare(const UE::Online::FAuthLogin::Params& First, const UE::Online::FAuthLogin::Params& Second)
+		{
+			if (NamesGameServer(First) || NamesGameServer(Second))
+			{
+				return NamesGameServer(First) && NamesGameServer(Second);
+			}
+
+			return First.PlatformUserId == Second.PlatformUserId
+				&& First.CredentialsType == Second.CredentialsType
+				&& First.CredentialsId == Second.CredentialsId;
+		}
+
+		static uint32 GetTypeHash(const UE::Online::FAuthLogin::Params& Params)
+		{
+			return NamesGameServer(Params) ? HashGameServerLogin() : HashLoginParams(Params);
+		}
+	};
+
 	UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthLogin> FAuthSteam::Login(UE::Online::FAuthLogin::Params&& InParams)
 	{
-		const auto Op = GetOp<UE::Online::FAuthLogin>(MoveTemp(InParams));
+		const auto Op = GetJoinableOp<UE::Online::FAuthLogin, FLoginJoinFuncs>(MoveTemp(InParams));
+
+		if (Op->IsReady())
+		{
+			return Op->GetHandle();
+		}
 
 		// Step 1: Work out which identity is being logged in and prepare its account info.
 		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp)
@@ -236,12 +292,12 @@ namespace PoFigGames::Online
 
 			AccountInfoSteam->bIsServer = bGameServerLogin;
 
-			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(ACCOUNT_INFO_KEY_NAME, AccountInfoSteam.ToSharedRef());
+			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(AccountInfoKey, AccountInfoSteam.ToSharedRef());
 		})
 		// Step 2: Wait for the game server to be logged on, if this login is about one.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp)
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			// A client has nothing to wait for. A server does: the anonymous logon is asked for when the API
 			// comes up and confirmed by a callback, so failing here on BLoggedOn made a server which logged
@@ -258,7 +314,7 @@ namespace PoFigGames::Online
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp,
 			Steam::TSteamResult<Steam::Wrappers::FSteamGameServerLogOn>&& LogOnResult)
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			if (AccountInfoSteam->bIsServer)
 			{
@@ -295,7 +351,7 @@ namespace PoFigGames::Online
 		// Step 3: Ask Steam for the avatar of a user. A game server has no persona to fetch.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp) -> TFuture<Steam::TSteamResult<Steam::Wrappers::FSteamUserAvatar>>
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			if (AccountInfoSteam->bIsServer)
 			{
@@ -309,7 +365,7 @@ namespace PoFigGames::Online
 		// stays on the game thread and touches no disk.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp, Steam::TSteamResult<Steam::Wrappers::FSteamUserAvatar>&& AvatarResult) -> FSaveUserAvatar::Params
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			if (AccountInfoSteam->bIsServer)
 			{
@@ -372,7 +428,7 @@ namespace PoFigGames::Online
 		// Step 6: Bookkeeping and notifications, back on the game thread where the account info lives.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogin>& InAsyncOp, UE::Online::TDefaultErrorResult<FSaveUserAvatar>&& SaveResult)
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			if (SaveResult.IsOk())
 			{
@@ -432,7 +488,7 @@ namespace PoFigGames::Online
 				return;
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(ACCOUNT_INFO_KEY_NAME, AccountInfoSteam.ToSharedRef());
+			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(AccountInfoKey, AccountInfoSteam.ToSharedRef());
 		})
 		// Step 2: bookkeeping and notifications.
 		//
@@ -441,7 +497,30 @@ namespace PoFigGames::Online
 		// of that identity, which is what bDestroyAuth would otherwise ask to forget.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthLogout>& InAsyncOp)
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
+
+			// Steam keeps a ticket good and a session open until it is told otherwise, and both were asked
+			// for as the identity that is going away: a ticket comes from the client API, a session is
+			// opened by whichever API this process verifies through. Left behind, they outlive the login
+			// they belong to, and the tickets stay usable by whoever was given one.
+			if (AccountInfoSteam->bIsServer)
+			{
+				for (const auto& VerifiedSession : VerifiedAuthSessions)
+				{
+					SteamCallSync<Steam::Wrappers::FSteamEndAuthSession>({ .RemoteUserId = VerifiedSession.Value });
+				}
+
+				VerifiedAuthSessions.Empty();
+			}
+			else
+			{
+				for (const auto& IssuedTicket : IssuedAuthTickets)
+				{
+					SteamCallSync<Steam::Wrappers::FSteamCancelAuthTicket>({ .TicketHandle = IssuedTicket.Value->TicketHandle });
+				}
+
+				IssuedAuthTickets.Empty();
+			}
 
 			AccountInfoSteam->LoginStatus = UE::Online::ELoginStatus::NotLoggedIn;
 
@@ -457,13 +536,15 @@ namespace PoFigGames::Online
 		return Op->GetHandle();
 	}
 
-	TFuture<UE::Online::TDefaultErrorResultInternal<TSharedRef<Steam::FSteamAuthTicketData>>> FAuthSteam::IssueAuthTicket()
+	TFuture<UE::Online::TDefaultErrorResultInternal<TSharedRef<Steam::FSteamAuthTicketData>>> FAuthSteam::IssueAuthTicket(const SteamNetworkingIdentity& Target)
 	{
 		using FIssuedTicketResult = UE::Online::TDefaultErrorResultInternal<TSharedRef<Steam::FSteamAuthTicketData>>;
 
 		if (Config.bVerifyAuthTicketsOnGameServer)
 		{
-			return SteamListen<Steam::Wrappers::FSteamAuthSessionTicket>({ })
+			// A web api ticket names its audience by a string from the configuration instead, so the target
+			// only reaches the session ticket.
+			return SteamListen<Steam::Wrappers::FSteamAuthSessionTicket>({ .Target = Target })
 			.Next([](Steam::TSteamResult<Steam::Wrappers::FSteamAuthSessionTicket>&& Result)
 			{
 				if (Result.IsError())
@@ -492,7 +573,25 @@ namespace PoFigGames::Online
 		return Config.bVerifyAuthTicketsOnGameServer ? UE::Online::ExternalLoginType::SteamSessionTicket : ExternalLoginType::SteamWebApiTicket;
 	}
 
+	UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> FAuthSteam::RequestBoundAuthTicket(
+		const UE::Online::IAuthPtr& Auth, UE::Online::FAuthQueryVerifiedAuthTicket::Params Params, const Steam::FSteamNetAddress& Peer)
+	{
+		const auto AuthSteam = StaticCastSharedPtr<FAuthSteam>(Auth);
+
+		return AuthSteam->QueryVerifiedAuthTicket(MoveTemp(Params), Peer);
+	}
+
 	UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> FAuthSteam::QueryVerifiedAuthTicket(UE::Online::FAuthQueryVerifiedAuthTicket::Params&& InParams)
+	{
+		// Nobody named a host, so the ticket is bound to none and is good wherever it is shown.
+		SteamNetworkingIdentity Anybody;
+		Anybody.Clear();
+
+		return QueryVerifiedAuthTicket(MoveTemp(InParams), Anybody);
+	}
+
+	UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> FAuthSteam::QueryVerifiedAuthTicket(
+		UE::Online::FAuthQueryVerifiedAuthTicket::Params&& InParams, const SteamNetworkingIdentity& Target)
 	{
 		const auto Op = GetOp<UE::Online::FAuthQueryVerifiedAuthTicket>(MoveTemp(InParams));
 
@@ -508,10 +607,10 @@ namespace PoFigGames::Online
 				InAsyncOp.SetError(UE::Online::Errors::NotLoggedIn());
 			}
 		})
-		// Step 2: Ask Steam for a ticket of the kind the config asks for.
-		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthQueryVerifiedAuthTicket>& /*InAsyncOp*/)
+		// Step 2: Ask Steam for a ticket of the kind the config asks for, for the host it is meant for.
+		.Then([this, Target](UE::Online::TOnlineAsyncOp<UE::Online::FAuthQueryVerifiedAuthTicket>& /*InAsyncOp*/)
 		{
-			return IssueAuthTicket();
+			return IssueAuthTicket(Target);
 		})
 		// Step 3: Remember the ticket so that it can be withdrawn, and hand it to the caller.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthQueryVerifiedAuthTicket>& InAsyncOp,
@@ -677,10 +776,10 @@ namespace PoFigGames::Online
 		// Step 3: Track the user for as long as the session lasts.
 		//
 		// Written out rather than wrapped in Steam::Unwrap, because this step has something to undo when it
-		// fails: a request which went pending and then timed out left a session open on Steam's side, and
+		// fails: a request Steam accepted and then never answered leaves a session open on its side, and
 		// Steam answers the next BeginAuthSession for that user with DuplicateRequest until it is closed.
 		// A refused verdict closes itself inside the wrapper, where it is known that a session was opened;
-		// a timeout is only visible here.
+		// a request that timed out or was cancelled is only visible here.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FAuthBeginVerifiedAuthSession>& InAsyncOp,
 			Steam::TSteamResult<Steam::Wrappers::FSteamBeginAuthSession>&& SessionResultOrError)
 		{
@@ -693,7 +792,7 @@ namespace PoFigGames::Online
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FAuthSteam::BeginVerifiedAuthSession] Failed: User [%s], Result [%s]"),
 					*ToLogString(Params.RemoteAccountId), *Error.GetLogString());
 
-				if (Error == UE::Online::Errors::ErrorCode::Common::Timeout)
+				if (Error == UE::Online::Errors::ErrorCode::Common::Timeout || Error == UE::Online::Errors::ErrorCode::Common::Cancelled)
 				{
 					SteamCallSync<Steam::Wrappers::FSteamEndAuthSession>({ .RemoteUserId = GetSteamUserId(Params.RemoteAccountId) });
 				}
@@ -726,7 +825,7 @@ namespace PoFigGames::Online
 		{
 			const auto& Params = InAsyncOp.GetParams();
 
-			const CSteamID* RemoteUserId = VerifiedAuthSessions.Find(Params.SessionId);
+			const auto RemoteUserId = VerifiedAuthSessions.Find(Params.SessionId);
 			if (RemoteUserId == nullptr)
 			{
 				// Expected rather than wrong: a revoked verdict closes the session where it arrives, and the
@@ -836,13 +935,13 @@ namespace PoFigGames::Online
 					Steam::TSteamResult<Steam::Wrappers::FSteamUserAvatar>(UE::Online::Errors::NotLoggedIn())).GetFuture();
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(ACCOUNT_INFO_KEY_NAME, AccountInfoSteam.ToSharedRef());
+			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(AccountInfoKey, AccountInfoSteam.ToSharedRef());
 
 			if (Params.bRefreshDisplayName)
 			{
 				if (ISteamFriends* Friends = Steam::GetSteamInterface<ISteamFriends>())
 				{
-					InAsyncOp.Data.Set<FString>(DISPLAY_NAME_KEY_NAME, StringCast<TCHAR>(Friends->GetPersonaName()).Get());
+					InAsyncOp.Data.Set<FString>(DisplayNameKey, StringCast<TCHAR>(Friends->GetPersonaName()).Get());
 				}
 			}
 
@@ -894,7 +993,7 @@ namespace PoFigGames::Online
 		// Step 4: Publish what actually changed.
 		.Then([this](UE::Online::TOnlineAsyncOp<FAuthRefreshAccountAttributesImpl>& InAsyncOp, UE::Online::TDefaultErrorResult<FSaveUserAvatar>&& SaveResult)
 		{
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			UE::Online::FAuthAccountAttributesChanged AttributesChanged { AccountInfoSteam };
 
@@ -917,7 +1016,7 @@ namespace PoFigGames::Online
 				}
 			};
 
-			if (const FString* DisplayName = InAsyncOp.Data.Get<FString>(DISPLAY_NAME_KEY_NAME))
+			if (const FString* DisplayName = InAsyncOp.Data.Get<FString>(DisplayNameKey))
 			{
 				ApplyAttribute(UE::Online::AccountAttributeData::DisplayName, UE::Online::FSchemaVariant(*DisplayName));
 			}

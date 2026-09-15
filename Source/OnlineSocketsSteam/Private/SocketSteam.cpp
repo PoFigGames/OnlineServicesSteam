@@ -685,5 +685,5 @@ namespace PoFigGames::Steam
 		SocketSubsystem->SetLastSocketError(SE_EOPNOTSUPP);
 		return false;
 	}
-	#pragma endregion
+	#pragma endregion Unsupported
 }

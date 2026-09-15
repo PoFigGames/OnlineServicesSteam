@@ -2,8 +2,8 @@
 
 #pragma once
 
+#include "Online/OnlineIdSteam.h"
 #include "Online/OnlineServicesCommon.h"
-#include "OnlineIdSteam.h"
 #include "SocketSubsystemSteam.h"
 #include "Steam/SteamCallDispatcher.h"
 #include "SteamServiceBase.h"
@@ -14,15 +14,18 @@ namespace PoFigGames::Steam
 	class FSteamServerService;
 }
 
-namespace PoFigGames::Online {
+namespace PoFigGames::Online
+{
 	using FAuthClientSteamPtr = TSharedPtr<class FAuthSteam>;
 	using FAuthServerSteamPtr = TSharedPtr<class FAuthServerSteam>;
 
 	/**
 	 * @class FOnlineServicesSteam
 	 *
-	 * Main Steam online services class.
-	 * Manages the initialization and lifecycle of the service interfaces (Client/Server) depending on the build type.
+	 * @brief The Steam implementation of the online services.
+	 *
+	 * Owns the lifetime of the client and game server interfaces, which of them exist being decided by the
+	 * role this process runs in.
 	 */
 	class FOnlineServicesSteam : public UE::Online::FOnlineServicesCommon
 	{
@@ -64,7 +67,6 @@ namespace PoFigGames::Online {
 		static const TCHAR* GetServiceConfigNameStatic() { return TEXT("Steam"); }
 
 	protected:
-		TUniquePtr<Steam::FSocketSubsystemSteam> SocketSubsystem { nullptr };
 		TUniquePtr<Steam::FSteamCallDispatcher> CallDispatcher { nullptr };
 
 		/**

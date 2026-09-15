@@ -2,10 +2,10 @@
 
 #pragma once
 
-#include "OnlineServicesSteamLogChannels.h"
 #include "Online/Auth.h"
 #include "Online/OnlineIdSteam.h"
 #include "Online/OnlineServicesSteam.h"
+#include "OnlineServicesSteamLogChannels.h"
 #include "Steam/SteamCallDispatcher.h"
 #include "Steam/SteamCallTraits.h"
 #include "Steam/SteamResult.h"
@@ -87,7 +87,7 @@ namespace PoFigGames::Online
 		UE::Online::TDefaultErrorResultInternal<CSteamID> ResolveSteamUser(const UE::Online::FAccountId& LocalAccountId,
 			const UE::Online::FAccountId& TargetAccountId, const TCHAR* Context) const
 		{
-			const UE::Online::IAuthPtr Auth = this->Services.GetAuthInterface();
+			const auto Auth = this->Services.GetAuthInterface();
 			if (!Auth.IsValid())
 			{
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[%s] Failed: Authentication Interface is not found"), Context);

@@ -10,14 +10,16 @@
 #include "SteamPlatformConfig.h"
 #include "SteamServiceBase.h"
 
+#include "SocketSubsystemModule.h"
 #include "Engine/GameEngine.h"
+#include "Engine/NetDriver.h"
 #include "Misc/ConfigCacheIni.h"
 #include "Modules/ModuleManager.h"
 #include "Online/Auth.h"
 #include "Online/OnlineAsyncOpHandle.h"
 #include "Online/OnlineResult.h"
 #include "Online/OnlineServices.h"
-#include "SocketSubsystemModule.h"
+#include "Online/OnlineServicesEngineUtils.h"
 
 THIRD_PARTY_INCLUDES_START
 #include "steam/isteamnetworkingsockets.h"
@@ -312,29 +314,26 @@ namespace PoFigGames::Steam
 			return ResultData;
 		}
 
+		// A relay address carries a channel rather than a port, and a channel is one byte wide, where an IP
+		// address takes the whole range. A candidate of a protocol nobody asked for, or one which cannot
+		// hold the service name asked for, is left out rather than offered with a port it quietly did not
+		// take.
 		for (const auto& Candidate : Candidates)
 		{
-			if (!bAnyProtocol && Candidate->GetProtocolType() != ProtocolTypeName)
-			{
-				continue;
-			}
+			const bool bSpeaksAskedProtocol = bAnyProtocol || Candidate->GetProtocolType() == ProtocolTypeName;
+			const int32 WidestPort = Candidate->GetProtocolType() == SteamRelayProtocol ? MAX_uint8 : MAX_uint16;
 
-			// A relay address carries a channel rather than a port, and a channel is one byte wide, where an
-			// IP address takes the whole range. A candidate which cannot hold the service name asked for is
-			// left out rather than offered with a port it quietly did not take.
-			if (const int32 WidestPort = Candidate->GetProtocolType() == SteamRelayProtocol ? MAX_uint8 : MAX_uint16; Port > WidestPort)
+			if (bSpeaksAskedProtocol && Port <= WidestPort)
 			{
-				continue;
-			}
+				// Each candidate was allocated for this call, so giving it the port affects nobody else.
+				if (Port >= 0)
+				{
+					Candidate->SetPort(Port);
+				}
 
-			// Each candidate was allocated for this call, so giving it the port affects nobody else.
-			if (Port >= 0)
-			{
-				Candidate->SetPort(Port);
+				// Datagram is what CreateSocket makes, and the only thing this subsystem can hand back.
+				ResultData.Results.Emplace(Candidate.ToSharedRef(), 0, Candidate->GetProtocolType(), SOCKTYPE_Datagram);
 			}
-
-			// Datagram is what CreateSocket makes, and the only thing this subsystem can hand back.
-			ResultData.Results.Emplace(Candidate.ToSharedRef(), 0, Candidate->GetProtocolType(), SOCKTYPE_Datagram);
 		}
 
 		// Being asked for a protocol none of the candidates speaks is a different failure from having
@@ -429,20 +428,42 @@ namespace PoFigGames::Steam
 		return OutAddresses;
 	}
 
-	UE::Online::IOnlineServicesPtr FSocketSubsystemSteam::GetOnlineServices()
+	UE::Online::IOnlineServicesPtr FSocketSubsystemSteam::GetOnlineServices(const UNetDriver* Driver)
 	{
-		return UE::Online::GetServices(UE::Online::EOnlineServices::Steam);
+		// A driver travelling out has no world of its own yet; the one it is leaving is where this process
+		// signed in, and is the world whose services its handshake has to speak to.
+		auto DriverWorld = Driver != nullptr ? Driver->GetWorld() : nullptr;
+
+		if (DriverWorld == nullptr && Driver != nullptr && GEngine != nullptr)
+		{
+			if (const auto Context = GEngine->GetWorldContextFromPendingNetGameNetDriver(Driver))
+			{
+				DriverWorld = Context->World();
+			}
+		}
+
+		// Asked for by name rather than through the world overload: that one goes to GetServices, which
+		// brings an instance up when there is none (FOnlineServicesRegistry::GetNamedServicesInstance,
+		// checked on 2026-09-16), and for this plugin that means a second FOnlineServicesSteam created from
+		// inside a packet handler. The transport only ever speaks to services the game has already brought up.
+		const auto InstanceName = UE::Online::GetServicesInstanceName(DriverWorld);
+		if (!UE::Online::IsLoaded(UE::Online::EOnlineServices::Steam, InstanceName))
+		{
+			return nullptr;
+		}
+
+		return UE::Online::GetServices(UE::Online::EOnlineServices::Steam, InstanceName);
 	}
 
-	UE::Online::IAuthPtr FSocketSubsystemSteam::GetAuthInterface()
+	UE::Online::IAuthPtr FSocketSubsystemSteam::GetAuthInterface(const UNetDriver* Driver)
 	{
-		const UE::Online::IOnlineServicesPtr OnlineServices = GetOnlineServices();
+		const UE::Online::IOnlineServicesPtr OnlineServices = GetOnlineServices(Driver);
 		return OnlineServices.IsValid() ? OnlineServices->GetAuthInterface() : nullptr;
 	}
 
 	UE::Online::FAccountId FSocketSubsystemSteam::GetLocalAccountId(const FPlatformUserId PlatformUserId)
 	{
-		const UE::Online::IAuthPtr Auth = GetAuthInterface();
+		const auto Auth = GetAuthInterface();
 		if (!Auth.IsValid())
 		{
 			return UE::Online::FAccountId { };
@@ -491,7 +512,7 @@ namespace PoFigGames::Steam
 		// for the moment the process is tearing that API down.
 		static const FSteamPlatformConfig DefaultConfig { };
 
-		const FSteamPlatformConfig* RunningConfig = GetRunningSteamConfig();
+		const auto RunningConfig = GetRunningSteamConfig();
 
 		return RunningConfig != nullptr ? *RunningConfig : DefaultConfig;
 	}
@@ -546,7 +567,12 @@ namespace PoFigGames::Steam
 			return PeerAddress;
 		}
 
-		if (const CSteamID CurrentUser = GetLocalSteamId(SteamGameServerPlatformId); CurrentUser.IsValid())
+		// The API this process speaks through had no identity to give, so the account it was logged in as
+		// answers instead - the same one the delayed listener waits for, which is the game server on a
+		// dedicated server and the player everywhere else.
+		const FPlatformUserId PlatformUserId = IsRunningDedicatedServer() ? SteamGameServerPlatformId : SteamClientPlatformId;
+
+		if (const CSteamID CurrentUser = GetLocalSteamId(PlatformUserId); CurrentUser.IsValid())
 		{
 			PeerAddress->SetSteamID(CurrentUser);
 			return PeerAddress;
@@ -581,12 +607,7 @@ namespace PoFigGames::Steam
 			// A record is marked rather than erased, so an address lookup which ignored the mark would keep
 			// handing out sockets which are already gone. The lookup by handle deliberately does not: both
 			// DestroySocket and the driver shutdown have to find a record a disconnection already marked.
-			if (It.Value().IsMarkedForDeletion())
-			{
-				continue;
-			}
-
-			if (It.Value() == ForAddress)
+			if (!It.Value().IsMarkedForDeletion() && It.Value() == ForAddress)
 			{
 				return &It.Value();
 			}
@@ -711,18 +732,26 @@ namespace PoFigGames::Steam
 			return false;
 		}
 
-		const auto Auth = GetAuthInterface();
+		// Only a listener on a Steam identity has anything to wait for. An IP socket is already bound to the
+		// address it will answer on, and what a login returns has no place in it.
+		if (ListenSocket->BindAddress.GetProtocolType() != SteamRelayProtocol)
+		{
+			UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("A listener on %s has no login to wait for"), *ListenSocket->BindAddress.GetProtocolType().ToString());
+			return false;
+		}
+
+		const auto Auth = GetAuthInterface(NetDriver);
 
 		// Which account has to appear before this process can host: a dedicated server waits for the game
-		// server it logs on anonymously, and a client hosting a listen server waits for the player. The
-		// client case is the one bInitServerOnClient answers for; a dedicated server never runs a client API
-		// and used to be refused here by a flag that has nothing to say about it.
-		const bool bIsDedicatedServer = IsRunningDedicatedServer();
-		const FPlatformUserId PlatformUserId = bIsDedicatedServer ? SteamGameServerPlatformId : SteamClientPlatformId;
+		// server it logs on anonymously, and a client hosting a listen server waits for the player, because
+		// over the relay it listens on that player's identity. Nothing else is asked for: bInitServerOnClient
+		// says whether this process also brings the game server API up, which is not the same question and
+		// used to refuse a listen host that had every right to host.
+		const FPlatformUserId PlatformUserId = IsRunningDedicatedServer() ? SteamGameServerPlatformId : SteamClientPlatformId;
 
-		if (!Auth.IsValid() || (!bIsDedicatedServer && !GetSteamConfig().bInitServerOnClient))
+		if (!Auth.IsValid())
 		{
-			UE_LOG(LogOnlineSocketsSteam, Error, TEXT("Nothing in this process can log in to host, so the listener cannot be held open"));
+			UE_LOG(LogOnlineSocketsSteam, Error, TEXT("There are no online services to log in with, so the listener cannot be held open"));
 			return false;
 		}
 

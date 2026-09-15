@@ -82,7 +82,7 @@ namespace PoFigGames::Steam
 		FSteamNetAddress(const SteamNetworkingIdentity& NewAddress, const uint8 InChannel = 0u)
 			: Addr(NewAddress)
 			, Channel(InChannel)
-			, ProtocolType(NewAddress.GetIPAddr() ? SteamIpProtocol : SteamRelayProtocol) 
+			, ProtocolType(NewAddress.GetIPAddr() ? SteamIpProtocol : SteamRelayProtocol)
 		{
 		}
 
@@ -123,12 +123,12 @@ namespace PoFigGames::Steam
 		/**
 		 * The SteamID this address names.
 		 * An address holding an IP has none, and returns an invalid id.
-		 */ 
+		 */
 		CSteamID GetSteamID() const
 		{
 			return Addr.GetSteamID();
 		}
-	
+
 		uint64 GetSteamID64() const
 		{
 			return GetSteamID().ConvertToUint64();
@@ -142,21 +142,21 @@ namespace PoFigGames::Steam
 			ProtocolType = SteamRelayProtocol;
 			Addr.SetSteamID(NewSteamID);
 		}
-	
+
 		void SetSteamIdentity(const SteamNetworkingIdentity& NewSteamIdentity)
 		{
 			ProtocolType = NewSteamIdentity.GetIPAddr() ? SteamIpProtocol : SteamRelayProtocol;
 			Addr = NewSteamIdentity;
 		}
-	
+
 		void SetNetworkingAddr(const uint32 IpAddress, const uint32 Port)
 		{
 			SteamNetworkingIPAddr NewAddr { };
 			NewAddr.SetIPv4(IpAddress, static_cast<uint16>(FMath::Min<uint32>(Port, MAX_uint16)));
-		
+
 			SetNetworkingAddr(NewAddr);
 		}
-	
+
 		void SetNetworkingAddr(const SteamNetworkingIPAddr& NewAddr)
 		{
 			ProtocolType = SteamIpProtocol;
@@ -203,7 +203,7 @@ namespace PoFigGames::Steam
 				Channel = static_cast<uint8>(InPort);
 			}
 		}
-	
+
 		/**
 		 * The channel this address speaks on.
 		 */
@@ -211,13 +211,13 @@ namespace PoFigGames::Steam
 		{
 			return Channel;
 		}
-	
-		/** 
-		 * Sets the address to be any address 
+
+		/**
+		 * Sets the address to be any address
 		 */
 		STEAMWORKSCOMMON_API virtual void SetAnyAddress() override;
 
-		/** 
+		/**
 		 * Sets the address to broadcast
 		 */
 		virtual void SetBroadcastAddress() override
@@ -285,10 +285,10 @@ namespace PoFigGames::Steam
 			{
 				return *IPAddr;
 			}
-		
+
 			SteamNetworkingIPAddr EmptyAddr;
 			EmptyAddr.Clear();
-		
+
 			return EmptyAddr;
 		}
 

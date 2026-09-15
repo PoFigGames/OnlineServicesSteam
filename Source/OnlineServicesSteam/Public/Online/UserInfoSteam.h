@@ -176,9 +176,9 @@ namespace PoFigGames::Online
 	 * Steam answers a persona query with a broadcast callback rather than with a result, so a query only
 	 * waits for the data to arrive; reading it back afterwards is a synchronous call into the Steam cache.
 	 *
-	 * Each operation comes in two forms: the one of the engine, which is what the game and CommonUser call,
-	 * and a Steam one carrying the choices the engine parameters have no room for. The two share their
-	 * implementation, so the Steam form adds no second code path to keep working.
+	 * Each operation comes in two forms: the one of the engine, which is what a game written against Online
+	 * Services calls, and a Steam one carrying the choices the engine parameters have no room for. The two
+	 * share their implementation, so the Steam form adds no second code path to keep working.
 	 */
 	class FUserInfoSteam : public TOnlineComponentSteam<UE::Online::FUserInfoCommon>
 	{
@@ -229,7 +229,8 @@ namespace PoFigGames::Online
 	};
 }
 
-namespace UE::Online::Meta {
+namespace UE::Online::Meta
+{
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Online::FQueryUserInfoSteam::Params)
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FQueryUserInfoSteam::Params, LocalAccountId),
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FQueryUserInfoSteam::Params, AccountIds),

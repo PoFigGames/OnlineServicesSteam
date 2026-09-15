@@ -21,14 +21,13 @@ public class OnlineSocketsSteam : ModuleRules
 				"CoreOnline",
 			]
 		);
-		
+
 		PrivateDependencyModuleNames.AddRange(
 			[
 				"CoreOnline",
 				"CoreUObject",
-				// The handshake this transport adds to every connection, where a joining player proves who
-				// they are before the engine has a login to refuse.
 				"PacketHandler",
+				"OnlineSubsystemUtils",
 			]
 		);
 

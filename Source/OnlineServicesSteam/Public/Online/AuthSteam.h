@@ -9,8 +9,9 @@
 #include "SteamUtils.h"
 
 
-namespace PoFigGames::Online {
-	inline const FString ACCOUNT_INFO_KEY_NAME { TEXT("AccountInfoSteam") };
+namespace PoFigGames::Online
+{
+	inline const FString AccountInfoKey { TEXT("AccountInfoSteam") };
 
 	namespace LoginCredentialsType
 	{
@@ -21,7 +22,7 @@ namespace PoFigGames::Online {
 		 * Only a process running both APIs has to ask for this explicitly. On a dedicated server, where there
 		 * is no client API to log a user into, a login which names no credentials resolves to it.
 		 */
-		const FName AnonymousGameServer = TEXT("SteamAnonymousGameServer");
+		inline const FName AnonymousGameServer { TEXT("SteamAnonymousGameServer") };
 	}
 
 	namespace ExternalLoginType
@@ -30,7 +31,7 @@ namespace PoFigGames::Online {
 		 * Ticket bound to a Web API identity, verified by a backend through ISteamUserAuth/AuthenticateUserTicket.
 		 * Told apart from UE::Online::ExternalLoginType::SteamSessionTicket, which a host verifies itself.
 		 */
-		const FName SteamWebApiTicket = TEXT("SteamWebApiTicket");
+		inline const FName SteamWebApiTicket { TEXT("SteamWebApiTicket") };
 	}
 
 	/**
@@ -59,10 +60,10 @@ namespace PoFigGames::Online {
 	namespace AccountAttributeData
 	{
 		/**
-		 * Local file the user's avatar was cached to. UCommonUserSubsystem::GetLocalUserAvatarUrl looks this
-		 * attribute up by the same name, so it cannot be renamed on one side alone.
+		 * Local file the user's avatar was cached to. Whatever shows an avatar looks this attribute up by
+		 * name, so it cannot be renamed on one side alone.
 		 */
-		const UE::Online::FSchemaAttributeId AvatarUrl = TEXT("AvatarUrl");
+		inline const UE::Online::FSchemaAttributeId AvatarUrl { TEXT("AvatarUrl") };
 	}
 
 	/**
@@ -122,7 +123,7 @@ namespace PoFigGames::Online {
 		ONLINESERVICESSTEAM_API TSharedPtr<FAccountInfoSteam> Find(UE::Online::FAccountId AccountId) const;
 		ONLINESERVICESSTEAM_API TSharedPtr<FAccountInfoSteam> Find(const CSteamID& SteamAccountId) const;
 
-		void Register(const TSharedRef<FAccountInfoSteam>&UserAuthData);
+		void Register(const TSharedRef<FAccountInfoSteam>& UserAuthData);
 		void Unregister(UE::Online::FAccountId AccountId);
 
 	protected:
@@ -159,6 +160,20 @@ namespace PoFigGames::Online {
 
 		/** Issues a ticket which proves this user's identity to a host, in the form the config asks for. */
 		ONLINESERVICESSTEAM_API virtual UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> QueryVerifiedAuthTicket(UE::Online::FAuthQueryVerifiedAuthTicket::Params&& Params) override;
+
+		/**
+		 * The Steam form: the ticket is bound to the host it is meant for, which the engine parameters have
+		 * no room to name. A ticket bound to nobody is one a host can show on to another host as its own.
+		 */
+		ONLINESERVICESSTEAM_API UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> QueryVerifiedAuthTicket(
+			UE::Online::FAuthQueryVerifiedAuthTicket::Params&& Params, const SteamNetworkingIdentity& Target);
+
+		/**
+		 * The Steam form as the transport reaches it: it holds the auth interface of its own world already,
+		 * and asks through here because the socket module cannot name this one.
+		 */
+		static ONLINESERVICESSTEAM_API UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthQueryVerifiedAuthTicket> RequestBoundAuthTicket(
+			const UE::Online::IAuthPtr& Auth, UE::Online::FAuthQueryVerifiedAuthTicket::Params Params, const Steam::FSteamNetAddress& Peer);
 		ONLINESERVICESSTEAM_API virtual UE::Online::TOnlineAsyncOpHandle<UE::Online::FAuthCancelVerifiedAuthTicket> CancelVerifiedAuthTicket(UE::Online::FAuthCancelVerifiedAuthTicket::Params&& Params) override;
 
 		/** Issues a ticket for a backend, whichever way tickets for hosts are verified. */
@@ -187,7 +202,7 @@ namespace PoFigGames::Online {
 		ONLINESERVICESSTEAM_API bool IsGameServerLogin(const UE::Online::FAuthLogin::Params& Params) const;
 
 		/** Issues a ticket of the kind the config asks for. */
-		ONLINESERVICESSTEAM_API TFuture<UE::Online::TDefaultErrorResultInternal<TSharedRef<Steam::FSteamAuthTicketData>>> IssueAuthTicket();
+		ONLINESERVICESSTEAM_API TFuture<UE::Online::TDefaultErrorResultInternal<TSharedRef<Steam::FSteamAuthTicketData>>> IssueAuthTicket(const SteamNetworkingIdentity& Target);
 
 		/** Which kind of ticket QueryVerifiedAuthTicket hands out in the current configuration. */
 		ONLINESERVICESSTEAM_API FName GetIssuedAuthTicketType() const;

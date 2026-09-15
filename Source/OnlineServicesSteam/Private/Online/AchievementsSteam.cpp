@@ -161,49 +161,46 @@ namespace PoFigGames::Online
 		for (uint32 AchievementIndex = 0u; AchievementIndex < AchievementCount; ++AchievementIndex)
 		{
 			const auto AchievementName = UserStats->GetAchievementName(AchievementIndex);
+
 			if (AchievementName == nullptr || *AchievementName == '\0')
 			{
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FAchievementsSteam::QueryAchievementDefinitions] Skipping an achievement Steam did not name: Index [%u]"), AchievementIndex);
-				continue;
 			}
-
-			FString AchievementId = StringCast<TCHAR>(AchievementName).Get();
-
-			auto& AchievementDefinition = NewAchievementDefinitions.Emplace(AchievementId);
-			AchievementDefinition.AchievementId = AchievementId;
-
-			// Steam holds a single name and a single description, so both sides of the definition read the
-			// same; the flavour text it has no notion of at all and is left empty.
-			AchievementDefinition.UnlockedDisplayName = Private::GetDisplayAttribute(*UserStats, AchievementName, Private::DisplayAttributeName);
-			AchievementDefinition.UnlockedDescription = Private::GetDisplayAttribute(*UserStats, AchievementName, Private::DisplayAttributeDescription);
-			AchievementDefinition.LockedDisplayName = AchievementDefinition.UnlockedDisplayName;
-			AchievementDefinition.LockedDescription = AchievementDefinition.UnlockedDescription;
-
-			AchievementDefinition.bIsHidden = FCStringAnsi::Strcmp(
-				UserStats->GetAchievementDisplayAttribute(AchievementName, Private::DisplayAttributeHidden), Private::DisplayAttributeSet) == 0;
-
-			// Which stats drive an achievement is part of the schema Steam keeps on its backend rather than
-			// of anything the client can read, so the answer is the one the game configured.
-			for (const auto& UnlockRule : Config.UnlockRules)
+			else
 			{
-				if (UnlockRule.AchievementId != AchievementId)
-				{
-					continue;
-				}
+				FString AchievementId = StringCast<TCHAR>(AchievementName).Get();
 
-				for (const auto& Condition : UnlockRule.Conditions)
+				auto& AchievementDefinition = NewAchievementDefinitions.Emplace(AchievementId);
+				AchievementDefinition.AchievementId = AchievementId;
+
+				// Steam holds a single name and a single description, so both sides of the definition read
+				// the same; the flavour text it has no notion of at all and is left empty.
+				AchievementDefinition.UnlockedDisplayName = Private::GetDisplayAttribute(*UserStats, AchievementName, Private::DisplayAttributeName);
+				AchievementDefinition.UnlockedDescription = Private::GetDisplayAttribute(*UserStats, AchievementName, Private::DisplayAttributeDescription);
+				AchievementDefinition.LockedDisplayName = AchievementDefinition.UnlockedDisplayName;
+				AchievementDefinition.LockedDescription = AchievementDefinition.UnlockedDescription;
+
+				AchievementDefinition.bIsHidden = FCStringAnsi::Strcmp(
+					UserStats->GetAchievementDisplayAttribute(AchievementName, Private::DisplayAttributeHidden), Private::DisplayAttributeSet) == 0;
+
+				// Which stats drive an achievement is part of the schema Steam keeps on its backend rather
+				// than of anything the client can read, so the answer is the one the game configured. The
+				// first rule that names this achievement is the one that answers for it.
+				const auto UnlockRule = Config.UnlockRules.FindByPredicate(
+					[&AchievementId](const UE::Online::FAchievementUnlockRule& Rule) { return Rule.AchievementId == AchievementId; });
+
+				if (UnlockRule != nullptr)
 				{
-					if (Condition.UnlockThreshold.GetType() != UE::Online::ESchemaAttributeType::Int64)
+					for (const auto& Condition : UnlockRule->Conditions)
 					{
-						continue;
+						if (Condition.UnlockThreshold.GetType() == UE::Online::ESchemaAttributeType::Int64)
+						{
+							AchievementDefinition.StatDefinitions.Emplace(UE::Online::FAchievementStatDefinition {
+								.StatId = Condition.StatName,
+								.UnlockThreshold = static_cast<uint32>(Condition.UnlockThreshold.GetInt64()) });
+						}
 					}
-
-					AchievementDefinition.StatDefinitions.Emplace(UE::Online::FAchievementStatDefinition {
-						.StatId = Condition.StatName,
-						.UnlockThreshold = static_cast<uint32>(Condition.UnlockThreshold.GetInt64()) });
 				}
-
-				break;
 			}
 		}
 
@@ -358,15 +355,16 @@ namespace PoFigGames::Online
 					if (!UserStats->GetAchievementAndUnlockTime(AchievementName.Get(), &bAchieved, &UnlockTimeInSeconds))
 					{
 						UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FAchievementsSteam::QueryAchievementStates] Steam->GetAchievementAndUnlockTime Failed: Achievement [%s]"), *Definition.Key);
-						continue;
 					}
-
-					// Steam publishes no progress of its own: an achievement with a progress bar is driven
-					// by the stats behind it, and what it reports is where those stats stand.
-					auto& AchievementState = NewAchievementStates.Emplace(Definition.Key);
-					AchievementState.AchievementId = Definition.Key;
-					AchievementState.Progress = bAchieved ? 1.0f : 0.0f;
-					AchievementState.UnlockTime = Private::GetUnlockTime(UnlockTimeInSeconds);
+					else
+					{
+						// Steam publishes no progress of its own: an achievement with a progress bar is
+						// driven by the stats behind it, and what it reports is where those stats stand.
+						auto& AchievementState = NewAchievementStates.Emplace(Definition.Key);
+						AchievementState.AchievementId = Definition.Key;
+						AchievementState.Progress = bAchieved ? 1.0f : 0.0f;
+						AchievementState.UnlockTime = Private::GetUnlockTime(UnlockTimeInSeconds);
+					}
 				}
 
 				UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FAchievementsSteam::QueryAchievementStates] Succeeded: User [%s], Achievements [%d]"),

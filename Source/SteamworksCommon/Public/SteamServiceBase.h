@@ -48,7 +48,7 @@ namespace PoFigGames::Steam
 		static constexpr HSteamPipe SteamPipeInvalid { 0 };
 
 		FSteamServiceBase(const FSteamServiceBase&) = delete;
-		auto& operator = (const FSteamServiceBase&) = delete;
+		FSteamServiceBase& operator=(const FSteamServiceBase&) = delete;
 
 		virtual ~FSteamServiceBase() = default;
 
@@ -173,8 +173,9 @@ namespace PoFigGames::Steam
 		{
 			if (!ServiceSlot->IsValid())
 			{
-				// The API has already been shut down in this process and the SDK offers no way back up.
-				UE_LOG(LogSteamService, Error, TEXT("The Steamworks API has been shut down and cannot be initialized again in this process"));
+				// The API is brought up at most once per process: this one either never came up or has since
+				// been shut down, and the SDK offers no supported way back.
+				UE_LOG(LogSteamService, Error, TEXT("The Steamworks API is not running and cannot be initialized again in this process"));
 				return nullptr;
 			}
 
@@ -188,13 +189,15 @@ namespace PoFigGames::Steam
 		}
 
 		auto Service = MakeShared<ServiceType>();
+
+		// A service which failed to come up is kept as well, so that the attempt is made once: retrying would
+		// either call the API up a second time or bring it back after the failing path had shut it down.
+		ServiceSlot = Service;
+
 		if (!Service->Init(Config))
 		{
-			// The API never came up, so the slot stays empty and a later attempt may try again.
 			return nullptr;
 		}
-
-		ServiceSlot = Service;
 
 		return Service;
 	}

@@ -124,7 +124,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamCreateLobby
 		 *
-		 * Creates a matchmaking lobby. Answered through the Steam CallResult system.
+		 * @brief Creates a matchmaking lobby. Answered through the Steam CallResult system.
 		 */
 		struct FSteamCreateLobby
 		{
@@ -170,7 +170,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamJoinLobby
 		 *
-		 * Joins an existing matchmaking lobby. Answered through the Steam CallResult system.
+		 * @brief Joins an existing matchmaking lobby. Answered through the Steam CallResult system.
 		 */
 		struct FSteamJoinLobby
 		{
@@ -228,7 +228,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamRequestLobbyList
 		 *
-		 * Requests the list of lobbies matching the filters set on the matchmaking interface.
+		 * @brief Requests the list of lobbies matching the filters set on the matchmaking interface.
 		 */
 		struct FSteamRequestLobbyList
 		{
@@ -267,7 +267,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamGetLobbySnapshot
 		 *
-		 * Reads the current metadata and member list of a lobby out of the local Steam cache.
+		 * @brief Reads the current metadata and member list of a lobby out of the local Steam cache.
 		 */
 		struct FSteamGetLobbySnapshot
 		{
@@ -345,7 +345,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamGetLobbyMemberData
 		 *
-		 * Reads the requested attributes of one lobby member out of the local Steam cache.
+		 * @brief Reads the requested attributes of one lobby member out of the local Steam cache.
 		 */
 		struct FSteamGetLobbyMemberData
 		{
@@ -385,13 +385,11 @@ namespace PoFigGames::Steam
 				for (const FString& Key : In.Keys)
 				{
 					// An unset attribute reads back as an empty string, which is not the same as a set one.
-					const ANSICHAR* Value = Interface->GetLobbyMemberData(In.LobbyId, In.MemberId, TCHAR_TO_UTF8(*Key));
-					if (Value == nullptr || *Value == '\0')
+					if (const ANSICHAR* Value = Interface->GetLobbyMemberData(In.LobbyId, In.MemberId, TCHAR_TO_UTF8(*Key));
+						Value != nullptr && *Value != '\0')
 					{
-						continue;
+						MemberData.Attributes.Emplace(FSteamLobbyAttributeData { .Key = Key, .Value = UTF8_TO_TCHAR(Value) });
 					}
-
-					MemberData.Attributes.Emplace(FSteamLobbyAttributeData { .Key = Key, .Value = UTF8_TO_TCHAR(Value) });
 				}
 
 				return TSteamResultOf<Result>(MoveTemp(MemberData));
@@ -401,7 +399,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamLobbyGameServer
 		 *
-		 * Address of the game server bound to a lobby.
+		 * @brief Address of the game server bound to a lobby.
 		 */
 		struct FSteamLobbyGameServer
 		{
@@ -413,7 +411,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamSetLobbyGameServer
 		 *
-		 * Binds a game server to a lobby, which only its owner may do.
+		 * @brief Binds a game server to a lobby, which only its owner may do.
 		 *
 		 * Steam mirrors the address into the metadata of the lobby under reserved keys of its own and
 		 * tells every member that the lobby now has a server, so there is nothing to publish by hand.
@@ -456,7 +454,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamGetLobbyGameServer
 		 *
-		 * Reads back the game server bound to a lobby, if it has one yet.
+		 * @brief Reads back the game server bound to a lobby, if it has one yet.
 		 */
 		struct FSteamGetLobbyGameServer
 		{
@@ -496,7 +494,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamUpdateLobbyData
 		 *
-		 * Applies a batch of metadata changes to a lobby.
+		 * @brief Applies a batch of metadata changes to a lobby.
 		 */
 		struct FSteamUpdateLobbyData
 		{
@@ -564,7 +562,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamSendLobbyControlMessage
 		 *
-		 * Broadcasts one control message to every member of a lobby.
+		 * @brief Broadcasts one control message to every member of a lobby.
 		 */
 		struct FSteamSendLobbyControlMessage
 		{
@@ -601,7 +599,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamReadLobbyChatEntry
 		 *
-		 * Reads one entry off the lobby chat channel, as announced by LobbyChatMsg_t.
+		 * @brief Reads one entry off the lobby chat channel, as announced by LobbyChatMsg_t.
 		 */
 		struct FSteamReadLobbyChatEntry
 		{
@@ -652,7 +650,7 @@ namespace PoFigGames::Steam
 		/**
 		 * @struct FSteamLeaveLobby
 		 *
-		 * Leaves a lobby. Steam answers immediately and does not report a result.
+		 * @brief Leaves a lobby. Steam answers immediately and does not report a result.
 		 */
 		struct FSteamLeaveLobby
 		{
@@ -684,6 +682,8 @@ namespace PoFigGames::Steam
 
 		/**
 		 * @struct FSteamDestroyLobby
+		 *
+		 * @brief Takes a lobby down.
 		 *
 		 * Steam has no dedicated destroy call, so the lobby is made private, flagged as being destroyed
 		 * for the remaining members and then left.

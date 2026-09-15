@@ -150,42 +150,52 @@ namespace PoFigGames::Online
 		for (const auto& StatName : StatNames)
 		{
 			const auto StatDefinition = GetStatDefinition(StatName);
+
 			if (StatDefinition == nullptr)
 			{
 				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FStatsSteam::ReadUserStats] Skipping a stat the configuration does not describe: Stat [%s]"), *StatName);
-				continue;
-			}
-
-			const auto SteamStatName = StringCast<ANSICHAR>(*StatName);
-			const auto StatType = StatDefinition->DefaultValue.GetType();
-
-			if (Private::IsFloatingPointStat(StatType))
-			{
-				float SteamValue { 0.0f };
-				if (SteamUserStats->GetUserStat(TargetSteamId, SteamStatName.Get(), &SteamValue))
-				{
-					UserStats.Stats.Emplace(StatName, UE::Online::FStatValue(static_cast<double>(SteamValue)));
-					continue;
-				}
 			}
 			else
 			{
-				int32 SteamValue { 0 };
-				if (SteamUserStats->GetUserStat(TargetSteamId, SteamStatName.Get(), &SteamValue))
+				const auto SteamStatName = StringCast<ANSICHAR>(*StatName);
+				const auto StatType = StatDefinition->DefaultValue.GetType();
+
+				auto bWasRead = false;
+
+				if (Private::IsFloatingPointStat(StatType))
 				{
-					UserStats.Stats.Emplace(StatName, Private::FromSteamInt(StatType, SteamValue));
-					continue;
+					float SteamValue { 0.0f };
+
+					if (SteamUserStats->GetUserStat(TargetSteamId, SteamStatName.Get(), &SteamValue))
+					{
+						UserStats.Stats.Emplace(StatName, UE::Online::FStatValue(static_cast<double>(SteamValue)));
+						bWasRead = true;
+					}
+				}
+				else
+				{
+					int32 SteamValue { 0 };
+
+					if (SteamUserStats->GetUserStat(TargetSteamId, SteamStatName.Get(), &SteamValue))
+					{
+						UserStats.Stats.Emplace(StatName, Private::FromSteamInt(StatType, SteamValue));
+						bWasRead = true;
+					}
+				}
+
+				// Steam refuses a stat it has never stored for this user, and equally one the backend of
+				// the title does not declare or declares as the other type. The configured default stands
+				// in for the first, which is the same answer the common implementation gives from its
+				// cache; the rest are a mismatch between the configuration and the backend, and read the
+				// same way.
+				if (!bWasRead)
+				{
+					UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FStatsSteam::ReadUserStats] Steam answered no value, using the configured default: User [%s], Stat [%s]"),
+						*ToLogString(TargetAccountId), *StatName);
+
+					UserStats.Stats.Emplace(StatName, StatDefinition->DefaultValue);
 				}
 			}
-
-			// Steam refuses a stat it has never stored for this user, and equally one the backend of the
-			// title does not declare or declares as the other type. The configured default stands in for
-			// the first, which is the same answer the common implementation gives from its cache; the rest
-			// are a mismatch between the configuration and the backend, and read the same way.
-			UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FStatsSteam::ReadUserStats] Steam answered no value, using the configured default: User [%s], Stat [%s]"),
-				*ToLogString(TargetAccountId), *StatName);
-
-			UserStats.Stats.Emplace(StatName, StatDefinition->DefaultValue);
 		}
 
 		return UserStats;
@@ -240,22 +250,23 @@ namespace PoFigGames::Online
 				}
 
 				WrittenUserStats.Stats.Emplace(UpdatedStat.Key, NewValue);
-				continue;
 			}
-
-			int32 CurrentValue { 0 };
-			SteamUserStats->GetStat(SteamStatName.Get(), &CurrentValue);
-
-			const auto NewValue = Private::ApplyModifyMethod(StatDefinition->ModifyMethod,
-				Private::FromSteamInt(StatType, CurrentValue), UpdatedStat.Value);
-
-			if (!SteamUserStats->SetStat(SteamStatName.Get(), Private::ToSteamInt(NewValue)))
+			else
 			{
-				UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FStatsSteam::UpdateStats] Steam->SetStat Failed: Stat [%s]"), *UpdatedStat.Key);
-				return FWriteResult(UE::Online::Errors::RequestFailure());
-			}
+				int32 CurrentValue { 0 };
+				SteamUserStats->GetStat(SteamStatName.Get(), &CurrentValue);
 
-			WrittenUserStats.Stats.Emplace(UpdatedStat.Key, NewValue);
+				const auto NewValue = Private::ApplyModifyMethod(StatDefinition->ModifyMethod,
+					Private::FromSteamInt(StatType, CurrentValue), UpdatedStat.Value);
+
+				if (!SteamUserStats->SetStat(SteamStatName.Get(), Private::ToSteamInt(NewValue)))
+				{
+					UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FStatsSteam::UpdateStats] Steam->SetStat Failed: Stat [%s]"), *UpdatedStat.Key);
+					return FWriteResult(UE::Online::Errors::RequestFailure());
+				}
+
+				WrittenUserStats.Stats.Emplace(UpdatedStat.Key, NewValue);
+			}
 		}
 
 		return FWriteResult(MoveTemp(WrittenUserStats));

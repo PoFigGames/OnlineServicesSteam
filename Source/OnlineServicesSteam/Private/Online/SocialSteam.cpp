@@ -94,32 +94,32 @@ namespace PoFigGames::Online
 		for (int32 FriendIndex = 0; FriendIndex < FriendCount; ++FriendIndex)
 		{
 			const CSteamID FriendSteamId = SteamFriends->GetFriendByIndex(FriendIndex, Private::FriendListFlags | Private::BlockedListFlags);
-			if (!FriendSteamId.IsValid())
+
+			if (FriendSteamId.IsValid())
 			{
-				continue;
+				const auto FriendAccountId = FindOrAddAccountId(FriendSteamId);
+				const auto Relationship = Private::TranslateRelationship(SteamFriends->GetFriendRelationship(FriendSteamId));
+
+				if (Relationship == UE::Online::ERelationship::Blocked)
+				{
+					NewBlockedUsers.Emplace(FriendAccountId);
+				}
+
+				// Somebody this list mentions who is nothing to the local user gets no entry of their own.
+				if (Relationship != UE::Online::ERelationship::NotFriend)
+				{
+					auto Friend = MakeShared<UE::Online::FFriend>();
+					Friend->FriendId = FriendAccountId;
+					Friend->Relationship = Relationship;
+
+					// The name Steam answers with already follows whatever nickname the local user gave
+					// them, so there is no second name to report; the call which would give one is
+					// deprecated.
+					Friend->DisplayName = StringCast<TCHAR>(SteamFriends->GetFriendPersonaName(FriendSteamId)).Get();
+
+					NewFriends.Emplace(FriendAccountId, MoveTemp(Friend));
+				}
 			}
-
-			const auto FriendAccountId = FindOrAddAccountId(FriendSteamId);
-			const auto Relationship = Private::TranslateRelationship(SteamFriends->GetFriendRelationship(FriendSteamId));
-
-			if (Relationship == UE::Online::ERelationship::Blocked)
-			{
-				NewBlockedUsers.Emplace(FriendAccountId);
-			}
-			else if (Relationship == UE::Online::ERelationship::NotFriend)
-			{
-				continue;
-			}
-
-			auto Friend = MakeShared<UE::Online::FFriend>();
-			Friend->FriendId = FriendAccountId;
-			Friend->Relationship = Relationship;
-
-			// The name Steam answers with already follows whatever nickname the local user gave them, so
-			// there is no second name to report; the call which would give one is deprecated.
-			Friend->DisplayName = StringCast<TCHAR>(SteamFriends->GetFriendPersonaName(FriendSteamId)).Get();
-
-			NewFriends.Emplace(FriendAccountId, MoveTemp(Friend));
 		}
 
 		// Whoever was in the list before and is not any more has stopped being anything to this user.
@@ -131,11 +131,11 @@ namespace PoFigGames::Online
 				{
 					BroadcastRelationshipUpdated(LocalAccountId, KnownFriend.Key, KnownFriend.Value->Relationship, (*NewFriend)->Relationship);
 				}
-
-				continue;
 			}
-
-			BroadcastRelationshipUpdated(LocalAccountId, KnownFriend.Key, KnownFriend.Value->Relationship, UE::Online::ERelationship::NotFriend);
+			else
+			{
+				BroadcastRelationshipUpdated(LocalAccountId, KnownFriend.Key, KnownFriend.Value->Relationship, UE::Online::ERelationship::NotFriend);
+			}
 		}
 
 		for (const auto& NewFriend : NewFriends)

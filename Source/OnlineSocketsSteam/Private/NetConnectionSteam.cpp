@@ -2,6 +2,8 @@
 
 #include "NetConnectionSteam.h"
 
+#include "AuthHandlerSteam.h"
+#include "Net/Core/Connection/NetCloseResult.h"
 #include "NetDriverSteam.h"
 #include "OnlineSocketsSteamLogChannels.h"
 #include "PacketHandler.h"
@@ -218,6 +220,15 @@ void UNetConnectionSteam::HandleRecvMessage(void* InData, int32 IncomingSize, co
 				}
 			}
 		}
+
+		// Still waiting means this packet was not the answer: it failed to unwrap, or it did not carry the
+		// cookie, or the challenge was restarted. None of those may go on to the connection - a peer that
+		// has not answered the challenge has not shown it can receive at the address it claims, and
+		// ReceivedRawPacket is where a packet starts costing something.
+		if (bAwaitingHandshake)
+		{
+			return;
+		}
 	}
 
 	UNetConnection::ReceivedRawPacket(IncomingData, IncomingSize);
@@ -265,4 +276,56 @@ void UNetConnectionSteam::InitBase(UNetDriver* InDriver, FSocket* InSocket, cons
 	PeerSocket = InSocket != nullptr
 		? TSharedPtr<PoFigGames::Steam::FSocketSteam>(static_cast<PoFigGames::Steam::FSocketSteam*>(InSocket)->AsSteamShared())
 		: nullptr;
+
+	// The handshake has no way to the connection of its own, and who the other end is the connection's to
+	// know.
+	if (const auto AuthHandler = GetAuthHandler())
+	{
+		if (PoFigGames::Steam::FSteamNetAddress PeerAddress; PeerSocket.IsValid() && PeerSocket->GetPeerAddress(PeerAddress))
+		{
+			AuthHandler->SetPeer(PeerAddress);
+		}
+
+		AuthHandler->SetConnection(this);
+	}
 }
+
+PoFigGames::Online::FAuthHandlerSteam* UNetConnectionSteam::GetAuthHandler() const
+{
+	const auto Component = Handler.IsValid() ? Handler->GetComponentByName(PoFigGames::Online::FAuthHandlerSteam::ComponentName) : nullptr;
+
+	return static_cast<PoFigGames::Online::FAuthHandlerSteam*>(Component.Get());
+}
+
+void UNetConnectionSteam::SetClientLoginState(const EClientLoginState::Type NewState)
+{
+	Super::SetClientLoginState(NewState);
+
+	// Only a connection the server accepted logs in, and only its own handshake proved anything.
+	if (NewState != EClientLoginState::Welcomed || Driver == nullptr || Driver->ServerConnection == this)
+	{
+		return;
+	}
+
+	// NMT_Login carries an identity of the client's own choosing, and the handshake has already proved
+	// one. The two have to be the same player, or everything the server keys on the player state - the
+	// statistics, the bans, who a later refusal belongs to - is about somebody else. Welcomed is reached
+	// once the game has taken the login and before any actor exists for it.
+	const auto VerifiedAccount = GetVerifiedAccount();
+
+	if (VerifiedAccount.IsValid() && (!PlayerId.IsV2() || PlayerId.GetV2Unsafe() != VerifiedAccount))
+	{
+		UE_LOG(LogOnlineSocketsSteam, Warning, TEXT("[UNetConnectionSteam] %s logged in as %s; the connection is refused."),
+			*ToLogString(VerifiedAccount), *PlayerId.ToDebugString());
+
+		Close(ENetCloseResult::PreLoginFailure);
+	}
+}
+
+UE::Online::FAccountId UNetConnectionSteam::GetVerifiedAccount() const
+{
+	const auto AuthHandler = GetAuthHandler();
+
+	return AuthHandler != nullptr ? AuthHandler->GetVerifiedAccount() : UE::Online::FAccountId { };
+}
+

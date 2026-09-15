@@ -12,6 +12,7 @@
 #include "Steam/Wrappers/SteamPresence.h"
 
 // Engine
+#include "Online/LobbiesCommonTypes.h"
 #include "Online/OnlineErrorDefinitions.h"
 
 
@@ -165,33 +166,29 @@ namespace PoFigGames::Online
 		for (int32 KeyIndex = 0; KeyIndex < KeyCount; ++KeyIndex)
 		{
 			const auto RichPresenceKey = Friends->GetFriendRichPresenceKeyByIndex(TargetSteamId, KeyIndex);
-			if (RichPresenceKey == nullptr || *RichPresenceKey == '\0')
+
+			if (RichPresenceKey != nullptr && *RichPresenceKey != '\0')
 			{
-				continue;
+				FString Key = StringCast<TCHAR>(RichPresenceKey).Get();
+				FString Value = StringCast<TCHAR>(Friends->GetFriendRichPresence(TargetSteamId, RichPresenceKey)).Get();
+
+				if (Key == StringCast<TCHAR>(Private::RichPresenceDisplayKey).Get())
+				{
+					Presence->StatusString = MoveTemp(Value);
+				}
+				else if (Key == StringCast<TCHAR>(Private::RichPresenceStatusKey).Get())
+				{
+					Presence->RichPresenceString = MoveTemp(Value);
+				}
+				else if (Key == Private::JoinabilityKey)
+				{
+					LexFromString(Presence->Joinability, *Value);
+				}
+				else
+				{
+					Presence->Properties.AddVariant(MoveTemp(Key), MoveTemp(Value));
+				}
 			}
-
-			FString Key = StringCast<TCHAR>(RichPresenceKey).Get();
-			FString Value = StringCast<TCHAR>(Friends->GetFriendRichPresence(TargetSteamId, RichPresenceKey)).Get();
-
-			if (Key == StringCast<TCHAR>(Private::RichPresenceDisplayKey).Get())
-			{
-				Presence->StatusString = MoveTemp(Value);
-				continue;
-			}
-
-			if (Key == StringCast<TCHAR>(Private::RichPresenceStatusKey).Get())
-			{
-				Presence->RichPresenceString = MoveTemp(Value);
-				continue;
-			}
-
-			if (Key == Private::JoinabilityKey)
-			{
-				LexFromString(Presence->Joinability, *Value);
-				continue;
-			}
-
-			Presence->Properties.AddVariant(MoveTemp(Key), MoveTemp(Value));
 		}
 
 		return Presence;
@@ -428,38 +425,43 @@ namespace PoFigGames::Online
 			}
 		});
 
-		// Steam answers for one user at a time, and the targets are known before the operation runs, which
-		// is why every request is chained up front.
-		for (const auto& TargetAccountId : Op->GetParams().TargetAccountIds)
+		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FBatchQueryPresence>& InAsyncOp)
 		{
-			Op->Then([this, TargetAccountId](UE::Online::TOnlineAsyncOp<UE::Online::FBatchQueryPresence>& InAsyncOp)
-			{
-				using FRichPresenceResult = Steam::TSteamResult<Steam::Wrappers::FSteamFriendRichPresence>;
+			using FRichPresenceResult = Steam::TSteamResult<Steam::Wrappers::FSteamFriendRichPresence>;
 
-				const CSteamID TargetSteamId = GetSteamUserId(TargetAccountId);
+			const auto& Params = InAsyncOp.GetParams();
+
+			TArray<CSteamID> TargetSteamIds;
+			TargetSteamIds.Reserve(Params.TargetAccountIds.Num());
+
+			for (const auto& TargetAccountId : Params.TargetAccountIds)
+			{
+				const auto TargetSteamId = GetSteamUserId(TargetAccountId);
 				if (!TargetSteamId.IsValid())
 				{
 					UE_LOG(LogOnlineServicesSteam, Warning, TEXT("[FPresenceSteam::BatchQueryPresence] Failed: No associated steam id found. User [%s]"), *ToLogString(TargetAccountId));
 
 					InAsyncOp.SetError(UE::Online::Errors::NotFound());
-					return MakeFulfilledPromise<FRichPresenceResult>(FRichPresenceResult(UE::Online::Errors::Cancelled())).GetFuture();
+					return UE::Online::WhenAll(TArray<TFuture<FRichPresenceResult>> { });
 				}
 
-				return SteamListen<Steam::Wrappers::FSteamFriendRichPresence>({ .UserId = TargetSteamId });
-			})
-			.Then([this, TargetAccountId](UE::Online::TOnlineAsyncOp<UE::Online::FBatchQueryPresence>& InAsyncOp, Steam::TSteamResult<Steam::Wrappers::FSteamFriendRichPresence>&& /*RichPresenceResult*/)
+				TargetSteamIds.Emplace(TargetSteamId);
+			}
+
+			// Steam answers for one user at a time, and says nothing at all about a user who published no
+			// rich presence, so the requests run together: chained, a batch would pay one timeout per user.
+			TArray<TFuture<FRichPresenceResult>> Requests;
+			Requests.Reserve(TargetSteamIds.Num());
+
+			for (const auto TargetSteamId : TargetSteamIds)
 			{
-				auto Presence = ReadUserPresence(TargetAccountId, GetSteamUserId(TargetAccountId));
-				CachedPresences.Emplace(TargetAccountId, Presence);
+				Requests.Emplace(SteamListen<Steam::Wrappers::FSteamFriendRichPresence>({ .UserId = TargetSteamId }));
+			}
 
-				if (InAsyncOp.GetParams().bListenToChanges)
-				{
-					WatchedUsers.Emplace(TargetAccountId);
-				}
-			});
-		}
-
-		Op->Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FBatchQueryPresence>& InAsyncOp)
+			return UE::Online::WhenAll(MoveTemp(Requests));
+		})
+		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FBatchQueryPresence>& InAsyncOp,
+			TArray<Steam::TSteamResult<Steam::Wrappers::FSteamFriendRichPresence>>&& /*RichPresenceResults*/)
 		{
 			const auto& Params = InAsyncOp.GetParams();
 
@@ -468,10 +470,15 @@ namespace PoFigGames::Online
 
 			for (const auto& TargetAccountId : Params.TargetAccountIds)
 			{
-				if (const auto Presence = CachedPresences.Find(TargetAccountId))
+				auto Presence = ReadUserPresence(TargetAccountId, GetSteamUserId(TargetAccountId));
+				CachedPresences.Emplace(TargetAccountId, Presence);
+
+				if (Params.bListenToChanges)
 				{
-					Result.Presences.Emplace(*Presence);
+					WatchedUsers.Emplace(TargetAccountId);
 				}
+
+				Result.Presences.Emplace(MoveTemp(Presence));
 			}
 
 			UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FPresenceSteam::BatchQueryPresence] Succeeded: User [%s], Users [%d]"),

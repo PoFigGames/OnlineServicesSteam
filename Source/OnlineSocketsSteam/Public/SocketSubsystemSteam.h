@@ -2,11 +2,11 @@
 
 #pragma once
 
-#include "SocketSubsystem.h"
+#include "Online/OnlineServices.h"
 #include "SocketSteam.h"
 #include "SocketSteamMessages.h"
+#include "SocketSubsystem.h"
 #include "SteamPlatformConfig.h"
-#include "Online/OnlineServices.h"
 
 
 class ISteamNetworkingSockets;
@@ -49,8 +49,17 @@ namespace PoFigGames::Steam
 		 * The subsystem talks to the services through the published interfaces alone, so that it neither
 		 * depends on the module implementing them nor has to be handed anything by it.
 		 */
-		static ONLINESOCKETSSTEAM_API UE::Online::IOnlineServicesPtr GetOnlineServices();
-		static ONLINESOCKETSSTEAM_API UE::Online::IAuthPtr GetAuthInterface();
+		static ONLINESOCKETSSTEAM_API UE::Online::IOnlineServicesPtr GetOnlineServices(const UNetDriver* Driver = nullptr);
+
+		/**
+		 * The Steam services and the authentication interface of the world a driver belongs to.
+		 *
+		 * A world played in the editor has its services instance named after its world context, so asking
+		 * for the unnamed one reaches a different instance from the game's - and makes it, if it does not
+		 * exist yet. Everywhere else the name is none, so a caller with no driver to name asks for the same
+		 * thing either way.
+		 */
+		static ONLINESOCKETSSTEAM_API UE::Online::IAuthPtr GetAuthInterface(const UNetDriver* Driver = nullptr);
 
 		/** The account of a signed in local user, or an invalid id when there is none. */
 		static ONLINESOCKETSSTEAM_API UE::Online::FAccountId GetLocalAccountId(FPlatformUserId PlatformUserId);
@@ -113,7 +122,7 @@ namespace PoFigGames::Steam
 		virtual bool IsSocketWaitSupported() const override { return false; }
 		virtual bool RequiresChatDataBeSeparate() override { return false; }
 		virtual bool RequiresEncryptedPackets() override { return false; }
-		#pragma endregion
+		#pragma endregion ISocketSubsystem
 
 		/** Set last socket error for UE */
 		FORCEINLINE void SetLastSocketError(const ESocketErrors Err) { LastSocketError = Err; }

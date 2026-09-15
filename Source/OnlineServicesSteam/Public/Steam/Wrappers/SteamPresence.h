@@ -12,8 +12,10 @@ namespace PoFigGames::Steam::Wrappers
 	/**
 	 * @struct FSteamFriendRichPresence
 	 *
-	 * Asks Steam for the rich presence of a user, which it only keeps for people the local user can see:
-	 * friends, and everybody in the same lobby or on the same server.
+	 * @brief Asks Steam for the rich presence of a user.
+	 *
+	 * Steam only keeps it for people the local user can see: friends, and everybody in the same lobby or on
+	 * the same server.
 	 *
 	 * Steam answers on a broadcast callback shared by every listener, and says nothing at all about a user
 	 * who has published no rich presence, so a caller which needs an answer either way should treat the
@@ -52,6 +54,15 @@ namespace PoFigGames::Steam::Wrappers
 			}
 
 			Interface->RequestFriendRichPresence(In.UserId);
+
+			// Steam never reports that a user published nothing, so waiting on the callback costs the whole
+			// timeout. Keys it already holds are the answer; the refresh just asked for arrives as a broadcast.
+			if (Interface->GetFriendRichPresenceKeyCount(In.UserId) > 0)
+			{
+				OutResult = TSteamResultOf<Result>(Result { .UserId = In.UserId });
+				return ESteamInvokeState::Completed;
+			}
+
 			return ESteamInvokeState::Pending;
 		}
 

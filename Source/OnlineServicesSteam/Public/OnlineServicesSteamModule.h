@@ -6,9 +6,9 @@
 
 
 /**
- * FOnlineServicesSteamModule
+ * @class FOnlineServicesSteamModule
  *
- * Online Services Steam Module (OSSv2). Based on SteamSharedModule.
+ * @brief The OSSv2 Steam services module. Based on SteamSharedModule.
  */
 class FOnlineServicesSteamModule final : public IModuleInterface
 {
@@ -21,7 +21,7 @@ public:
 
 	/**
 	 * The Steamworks libraries are linked once for the life of the process, so this module cannot be reloaded.
-	 */ 
+	 */
 	virtual bool SupportsDynamicReloading() override { return false; }
 
 	ONLINESERVICESSTEAM_API static int GetRegistryPriority();

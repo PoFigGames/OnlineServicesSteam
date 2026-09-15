@@ -29,7 +29,7 @@ namespace PoFigGames::Steam
 
 	TSharedPtr<FSocketSteamMessages> FSocketSteamMessages::FindPeerSocket(const SteamNetworkingIdentity& RemoteIdentity) const
 	{
-		const TWeakPtr<FSocketSteamMessages>* FoundSocket = AcceptedPeers.Find(RemoteIdentity.GetSteamID64());
+		const auto FoundSocket = AcceptedPeers.Find(RemoteIdentity.GetSteamID64());
 
 		return FoundSocket != nullptr ? FoundSocket->Pin() : nullptr;
 	}

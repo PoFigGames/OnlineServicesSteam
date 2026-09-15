@@ -12,7 +12,8 @@
 #include "Online/OnlineUtilsCommon.h"
 
 
-namespace PoFigGames::Online {
+namespace PoFigGames::Online
+{
 	/**
 	 * Whether the user owns the game in one of the ways Steam recognises.
 	 *
@@ -90,12 +91,12 @@ namespace PoFigGames::Online {
 				return;
 			}
 
-			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(ACCOUNT_INFO_KEY_NAME, StaticCastSharedRef<FAccountInfoSteam>(AccountResult.GetOkValue().AccountInfo));
+			InAsyncOp.Data.Set<TSharedRef<FAccountInfoSteam>>(AccountInfoKey, StaticCastSharedRef<FAccountInfoSteam>(AccountResult.GetOkValue().AccountInfo));
 		})
 		// Step 2: Collect every restriction which applies to it.
 		.Then([this](UE::Online::TOnlineAsyncOp<UE::Online::FQueryUserPrivilege>& InAsyncOp) {
 			const auto& Params = InAsyncOp.GetParams();
-			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, ACCOUNT_INFO_KEY_NAME);
+			const auto& AccountInfoSteam = GetOpDataChecked<TSharedRef<FAccountInfoSteam>>(InAsyncOp, AccountInfoKey);
 
 			// The anonymous identity of a game server owns nothing and is restricted by nobody, and the
 			// interfaces the answer would be read from belong to the client API which it does not run.

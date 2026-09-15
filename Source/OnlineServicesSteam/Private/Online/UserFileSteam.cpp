@@ -15,7 +15,8 @@
 #include "Online/OnlineErrorDefinitions.h"
 
 
-namespace UE::Online::Meta {
+namespace UE::Online::Meta
+{
 	BEGIN_ONLINE_STRUCT_META(PoFigGames::Online::FUserFileSteamConfig)
 		ONLINE_STRUCT_FIELD(PoFigGames::Online::FUserFileSteamConfig, bCompressBeforeUpload)
 	END_ONLINE_STRUCT_META()
@@ -29,7 +30,7 @@ namespace PoFigGames::Online
 		 * Marks a file this component compressed, so that what is read back is decided by the file rather
 		 * than by whatever the configuration happens to say at the time.
 		 */
-		static constexpr uint8 CompressedFileMagic[] { 'R', 'G', 'L', 'Z' };
+		static constexpr uint8 CompressedFileMagic[] { 'S', 'T', 'Z', '1' };
 
 		/** The uncompressed size travels with the file, because the decompressor has to be told it up front. */
 		static constexpr int32 CompressedFileHeaderSize { sizeof(CompressedFileMagic) + sizeof(uint32) };
@@ -181,13 +182,11 @@ namespace PoFigGames::Online
 				{
 					int32 FileSizeInBytes { 0 };
 
-					const auto Filename = RemoteStorage->GetFileNameAndSize(FileIndex, &FileSizeInBytes);
-					if (Filename == nullptr || *Filename == '\0')
+					if (const auto Filename = RemoteStorage->GetFileNameAndSize(FileIndex, &FileSizeInBytes);
+						Filename != nullptr && *Filename != '\0')
 					{
-						continue;
+						Filenames.Emplace(StringCast<TCHAR>(Filename).Get());
 					}
-
-					Filenames.Emplace(StringCast<TCHAR>(Filename).Get());
 				}
 
 				UE_LOG(LogOnlineServicesSteam, Verbose, TEXT("[FUserFileSteam::EnumerateFiles] Succeeded: User [%s], Files [%d]"),
