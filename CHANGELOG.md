@@ -57,6 +57,11 @@ against, but not yet proven against live Steam.
   was proved is on the connection, for the game to hold its own login against.
 - A dedicated server's anonymous login waits for Steam to confirm it rather than for the API to come up,
   and the listener is held open across it.
+- Privileges answer about this game rather than about the client it runs under. A locked Family View
+  permits the games on its list and Steam does not launch the others, so the lock alone restricts
+  nobody: the age restriction is reported when Steam says this app is blocked, while ownership, VAC and
+  the parental locks on friends and community are each asked about on their own. Checked against
+  Steamworks SDK 1.65 on 2026-09-19.
 - Steam hardware detection (`FSteamDeviceInfo`), covering Steam Deck and the rest of Valve's hardware
   through `IsRunningOnSteamHardware` and `GetSteamHardwareDefaultConfig`.
 - Steam forms of several operations, carrying choices the engine parameters have no room for: avatar

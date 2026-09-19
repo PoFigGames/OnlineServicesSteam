@@ -36,12 +36,22 @@ namespace PoFigGames::Online
 			&& ParentalSettings->BIsFeatureBlocked(Feature);
 	}
 
-	/** Whether a parent has the Steam client locked down at all. */
-	static bool IsParentalLockEngaged()
+	/**
+	 * Whether a parent has this game blocked.
+	 *
+	 * A locked Family View permits the games on its list and Steam does not launch the others, so the lock
+	 * alone says nothing about this app; only the per-app answer gates the player (Steamworks SDK 1.65,
+	 * checked on 2026-09-19).
+	 */
+	static bool IsAppParentallyBlocked()
 	{
 		auto ParentalSettings = Steam::GetSteamInterface<ISteamParentalSettings>();
+		auto UtilsInterface = Steam::GetSteamInterface<ISteamUtils>();
 
-		return ParentalSettings != nullptr && ParentalSettings->BIsParentalLockEnabled() && ParentalSettings->BIsParentalLockLocked();
+		return ParentalSettings != nullptr && UtilsInterface != nullptr
+			&& ParentalSettings->BIsParentalLockEnabled()
+			&& ParentalSettings->BIsParentalLockLocked()
+			&& ParentalSettings->BIsAppBlocked(UtilsInterface->GetAppID());
 	}
 
 	/** Sends the user to the store page of the game, which is the one restriction they can act on. */
@@ -154,7 +164,7 @@ namespace PoFigGames::Online
 				}
 			}
 
-			if (IsParentalLockEngaged())
+			if (IsAppParentallyBlocked())
 			{
 				PrivilegeResults |= UE::Online::EPrivilegeResults::AgeRestrictionFailure;
 			}
